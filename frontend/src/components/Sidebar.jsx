@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Store, Layers, LogOut, X } from 'lucide-react'
+import { LayoutDashboard, Store, Layers, ClipboardList, LogOut, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import Logo from '../assets/Logo.png'
 
@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/sales', label: 'Sales Entry', icon: Store },
   { to: '/manage-leather', label: 'Manage Leather', icon: Layers },
+  { to: '/audit-trail', label: 'Audit Trail', icon: ClipboardList },
 ]
 
 export default function Sidebar({ isOpen, onClose }) {

@@ -18,6 +18,8 @@ export default function LeatherDetail() {
   const [quantity, setQuantity] = useState(1)
   const [swatchIndex, setSwatchIndex] = useState(0)
   const [detailsModalOpen, setDetailsModalOpen] = useState(false)
+  const [validationMessage, setValidationMessage] = useState('')
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false)
 
   const {
     fulfillment,
@@ -32,6 +34,8 @@ export default function LeatherDetail() {
     setScheduledDate,
     scheduledTime,
     setScheduledTime,
+    paymentMethod,
+    setPaymentMethod,
     addToCart,
     openSummary,
   } = useCart()
@@ -62,7 +66,89 @@ export default function LeatherDetail() {
     customerName.trim() &&
     (fulfillment === 'Delivery'
       ? scheduledDate && scheduledTime && deliveryAddress.trim()
+      : fulfillment === 'Pick-up'
+      ? scheduledDate && scheduledTime
       : true)
+
+  const isTimeInRange = (time) => {
+    if (!time) return false
+    const [hours, minutes] = time.split(':').map(Number)
+    const totalMinutes = hours * 60 + minutes
+    const minTime = 10 * 60
+    const maxTime = 17 * 60
+    return totalMinutes >= minTime && totalMinutes <= maxTime
+  }
+
+  const getTodayDate = () => {
+    const today = new Date()
+    const year = today.getFullYear()
+    const month = String(today.getMonth() + 1).padStart(2, '0')
+    const day = String(today.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const getOrderValidationMessage = () => {
+    if (!hasStock) return 'Select an available batch before buying.'
+    if (!customerName.trim()) return 'Enter the customer name to continue.'
+    if (!fulfillment) return 'Choose Delivery or Pick-up to proceed.'
+    if (fulfillment === 'Delivery') {
+      if (!deliveryAddress.trim()) {
+        return 'Enter delivery address.'
+      }
+      if (!scheduledDate) {
+        return 'Select a delivery date.'
+      }
+      if (!scheduledTime) {
+        return 'Select a delivery time.'
+      }
+      if (!isTimeInRange(scheduledTime)) {
+        return 'Time must be between 10:00 AM and 5:00 PM.'
+      }
+      if (!paymentMethod) {
+        return 'Select a payment method.'
+      }
+    }
+    if (fulfillment === 'Pick-up') {
+      if (!scheduledDate) {
+        return 'Select a pick-up date.'
+      }
+      if (!scheduledTime) {
+        return 'Select a pick-up time.'
+      }
+      if (!isTimeInRange(scheduledTime)) {
+        return 'Time must be between 10:00 AM and 5:00 PM.'
+      }
+      if (!paymentMethod) {
+        return 'Select a payment method.'
+      }
+    }
+    return ''
+  }
+
+  const getDeliveryAddressError = () => {
+    if (attemptedSubmit && fulfillment === 'Delivery' && !deliveryAddress.trim()) return 'Delivery address is required.'
+    return ''
+  }
+
+  const getScheduledDateError = () => {
+    if (attemptedSubmit && (fulfillment === 'Delivery' || fulfillment === 'Pick-up') && !scheduledDate) return 'Date is required.'
+    return ''
+  }
+
+  const getScheduledTimeError = () => {
+    if (attemptedSubmit && (fulfillment === 'Delivery' || fulfillment === 'Pick-up') && !scheduledTime) return 'Time is required.'
+    if (
+      attemptedSubmit &&
+      (fulfillment === 'Delivery' || fulfillment === 'Pick-up') &&
+      scheduledTime &&
+      !isTimeInRange(scheduledTime)
+    ) {
+      return 'Time must be between 10:00 AM and 5:00 PM.'
+    }
+    return ''
+  }
+
+  const orderValidationMessage = getOrderValidationMessage()
 
   const buildLine = () => ({
     materialId: material.material_id,
@@ -75,10 +161,21 @@ export default function LeatherDetail() {
     color: material.tint,
   })
 
-  const closeDetailsModal = () => setDetailsModalOpen(false)
+  const closeDetailsModal = () => {
+    setDetailsModalOpen(false)
+    setAttemptedSubmit(false)
+  }
 
   const handleBuyNow = () => {
-    if (!selectedBatch || !orderReady) return
+    setAttemptedSubmit(true)
+    const validation = getOrderValidationMessage()
+    if (validation) {
+      setValidationMessage(validation)
+      return
+    }
+
+    setValidationMessage('')
+    if (!selectedBatch) return
     addToCart(buildLine())
     openSummary()
     if (detailsModalOpen) closeDetailsModal()
@@ -232,29 +329,28 @@ export default function LeatherDetail() {
           </div>
 
           <div className="mt-7 space-y-3">
-            {fulfillment === '' && (
-              <p className="text-sm font-semibold text-error">
-                Select Delivery or Pick-up before processing the sale.
-              </p>
-            )}
-            {fulfillment === 'Delivery' && (
+            {fulfillment && (
               <button
                 type="button"
                 onClick={() => setDetailsModalOpen(true)}
                 className="w-full rounded-lg border border-outline-variant bg-surface px-5 py-3 text-sm font-semibold text-on-surface transition-colors hover:bg-surface-variant"
               >
-                Add Delivery Details
+                {fulfillment === 'Delivery' ? 'Add Delivery Details' : 'Add Pick-up Details'}
               </button>
             )}
 
             <button
               type="button"
               onClick={handleBuyNow}
-              disabled={!orderReady}
-              className="w-full rounded-full bg-primary py-4 text-sm font-bold text-surface transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full rounded-full bg-primary py-4 text-sm font-bold text-surface transition-colors hover:bg-primary-dark"
             >
               <ShoppingCart size={18} className="inline-block mr-2" /> Buy Now
             </button>
+            {!detailsModalOpen && validationMessage && (
+              <p className="mt-3 text-center text-sm font-semibold text-error">
+                {validationMessage}
+              </p>
+            )}
           </div>
 
           {detailsModalOpen && (
@@ -284,11 +380,50 @@ export default function LeatherDetail() {
                     <textarea
                       value={orderDescription}
                       onChange={(e) => setOrderDescription(e.target.value)}
-                      rows={4}
+                      rows={2}
                       className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
 
+                  {fulfillment === 'Delivery' && (
+                    <div>
+                      <label className="text-sm font-semibold text-on-surface-variant">
+                        Delivery Address
+                      </label>
+                      <textarea
+                        value={deliveryAddress}
+                        onChange={(e) => setDeliveryAddress(e.target.value)}
+                        placeholder="Enter full delivery address"
+                        rows={2}
+                        className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      />
+                      {getDeliveryAddressError() && (
+                        <p className="mt-1.5 text-xs font-semibold text-error">{getDeliveryAddressError()}</p>
+                      )}
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="text-sm font-semibold text-on-surface-variant">
+                      Payment Method
+                    </label>
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      {['Cash', 'Bank Transfer', 'Gcash', 'Credit Card'].map((method) => (
+                        <button
+                          key={method}
+                          type="button"
+                          onClick={() => setPaymentMethod(method)}
+                          className={`rounded-lg border px-3.5 py-2 text-xs font-semibold transition-colors ${
+                            paymentMethod === method
+                              ? 'border-primary bg-primary/[0.08] text-primary'
+                              : 'border-outline-variant text-on-surface-variant hover:border-primary/40'
+                          }`}
+                        >
+                          {method}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
@@ -299,8 +434,12 @@ export default function LeatherDetail() {
                         type="date"
                         value={scheduledDate}
                         onChange={(e) => setScheduledDate(e.target.value)}
+                        min={getTodayDate()}
                         className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       />
+                      {getScheduledDateError() && (
+                        <p className="mt-1.5 text-xs font-semibold text-error">{getScheduledDateError()}</p>
+                      )}
                     </div>
                     <div>
                       <label className="text-sm font-semibold text-on-surface-variant">
@@ -310,24 +449,33 @@ export default function LeatherDetail() {
                         type="time"
                         value={scheduledTime}
                         onChange={(e) => setScheduledTime(e.target.value)}
+                        min="10:00"
+                        max="17:00"
                         className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       />
+                      {getScheduledTimeError() && (
+                        <p className="mt-1.5 text-xs font-semibold text-error">{getScheduledTimeError()}</p>
+                      )}
                     </div>
                   </div>
+                  {(fulfillment === 'Delivery' || fulfillment === 'Pick-up') && (
+                    <p className="text-xs text-on-surface-variant">
+                      Available scheduling hours are 10:00 AM to 5:00 PM.
+                    </p>
+                  )}
 
                   <div className="mt-4">
                     <button
                       type="button"
                       onClick={handleBuyNow}
-                      disabled={!orderReady}
-                      className="w-full rounded-full bg-primary py-4 text-sm font-bold text-surface transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                      className="w-full rounded-full bg-primary py-4 text-sm font-bold text-surface transition-colors hover:bg-primary-dark"
                     >
                       <ShoppingCart size={18} className="inline-block mr-2" /> Buy Now
                     </button>
 
-                    {!orderReady && (
-                      <p className="mt-3 text-sm text-on-surface-variant">
-                        Complete customer name, schedule, and {fulfillment === 'Delivery' ? 'delivery address' : 'pick-up schedule'} to continue.
+                    {validationMessage && (
+                      <p className="mx-auto mt-3 max-w-sm rounded-xl bg-surface px-3 py-2 text-center text-sm font-semibold text-error shadow-sm sm:max-w-md">
+                        {validationMessage}
                       </p>
                     )}
                   </div>

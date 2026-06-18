@@ -111,7 +111,7 @@ export default function AuthPage({ role = 'Sales Clerk', onBackToRoleSelect }) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="Clerk@otto.com"
+                placeholder="Email"
                 required
                 className="w-full rounded-lg border border-[#e2ddd2] bg-white py-2 pl-9 pr-3 text-xs text-[#2a2a2a] placeholder:text-[#b3aea3] focus:border-[#7a1f1f] focus:outline-none focus:ring-2 focus:ring-[#7a1f1f]/15 sm:py-2.5 sm:pl-10 sm:text-sm"
               />

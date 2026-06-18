@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { Plus, ImagePlus, Save, BadgeCheck, ChevronRight } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, ImagePlus, Save, BadgeCheck, ChevronRight, ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import StatusPill from '../components/StatusPill.jsx'
 import { hideBatches, LEATHER_TYPES, unitForType } from '../data/mockLeather.js'
@@ -29,6 +29,10 @@ function buildInitialRecentlyAdded() {
       material_name: b.material_name,
       size_sqft: b.size_sqft,
       leather_type: b.leather_type,
+      quantity: b.quantity,
+      salePrice: b.sale_price,
+      unitPrice: b.unit_price,
+      source: b.company,
       status: b.status,
       added: b.added,
     }))
@@ -52,8 +56,12 @@ export default function ManageLeather() {
   const navigate = useNavigate()
   const [recentlyAdded, setRecentlyAdded] = useState(buildInitialRecentlyAdded)
   const [justSaved, setJustSaved] = useState(false)
+  const [editingEntry, setEditingEntry] = useState(null)
+  const [editData, setEditData] = useState({})
 
   const unit = unitForType(leatherType)
+  const editUnit = unitForType(editData.leather_type || editingEntry?.leather_type || LEATHER_TYPES[0])
+
   const estValuation = (Number(sizeSqft) || 0) * (Number(unitPrice) || 0)
   const margin =
     Number(salePrice) > 0 ? ((Number(salePrice) - Number(unitPrice)) / Number(salePrice)) * 100 : 0
@@ -62,6 +70,61 @@ export default function ManageLeather() {
     const file = e.target.files?.[0]
     if (!file) return
     setPreviewUrl(URL.createObjectURL(file))
+  }
+
+  const openEditModal = (item) => {
+    setEditingEntry(item)
+    setEditData({
+      material_name: item.material_name,
+      leather_type: item.leather_type,
+      size_sqft: item.size_sqft,
+      quantity: item.quantity,
+      salePrice: item.salePrice,
+      unitPrice: item.unitPrice,
+      source: item.source,
+      status: item.status,
+    })
+  }
+
+  const closeEditModal = () => {
+    setEditingEntry(null)
+    setEditData({})
+  }
+
+  const saveEdit = () => {
+    if (!editingEntry) return
+    const updated = recentlyAdded.map((item) =>
+      item.batch_code === editingEntry.batch_code ? { ...item, ...editData } : item,
+    )
+    setRecentlyAdded(updated)
+
+    const history = JSON.parse(window.localStorage.getItem('manageLeatherHistory') || '[]') || []
+    const updatedHistory = history.map((item) =>
+      item.batch_code === editingEntry.batch_code ? { ...item, ...editData } : item,
+    )
+    window.localStorage.setItem('manageLeatherHistory', JSON.stringify(updatedHistory))
+
+    const auditEntry = {
+      id: Date.now(),
+      timestamp: new Date().toLocaleString(),
+      user: window.localStorage.getItem('userEmail')?.split('@')[0] || 'Clerk',
+      action: `Updated batch ${editingEntry.batch_code}`,
+      batch_code: editingEntry.batch_code,
+      status: editData.status,
+    }
+    const existingAudit = JSON.parse(window.localStorage.getItem('auditTrailEntries') || '[]') || []
+    window.localStorage.setItem('auditTrailEntries', JSON.stringify([auditEntry, ...existingAudit]))
+
+    closeEditModal()
+  }
+
+  const deleteEntry = (batchCode) => {
+    const updated = recentlyAdded.filter((item) => item.batch_code !== batchCode)
+    setRecentlyAdded(updated)
+
+    const history = JSON.parse(window.localStorage.getItem('manageLeatherHistory') || '[]') || []
+    const nextHistory = history.filter((item) => item.batch_code !== batchCode)
+    window.localStorage.setItem('manageLeatherHistory', JSON.stringify(nextHistory))
   }
 
   const resetForm = () => {
@@ -94,10 +157,21 @@ export default function ManageLeather() {
       added: 'Just now',
     }
 
-    setRecentlyAdded((prev) => [newEntry, ...prev].slice(0, 6))
+    const updatedHistory = [newEntry, ...(JSON.parse(window.localStorage.getItem('manageLeatherHistory') || '[]') || [])]
+    setRecentlyAdded((prev) => [newEntry, ...prev].slice(0, 5))
+    window.localStorage.setItem('manageLeatherHistory', JSON.stringify(updatedHistory))
+
+    const auditEntry = {
+      id: Date.now(),
+      timestamp: new Date().toLocaleString(),
+      user: window.localStorage.getItem('userEmail')?.split('@')[0] || 'Clerk',
+      action: `Created batch ${newEntry.batch_code}`,
+      batch_code: newEntry.batch_code,
+      status: newEntry.status,
+    }
     window.localStorage.setItem(
-      'manageLeatherHistory',
-      JSON.stringify([newEntry, ...(JSON.parse(window.localStorage.getItem('manageLeatherHistory') || '[]') || [])]),
+      'auditTrailEntries',
+      JSON.stringify([auditEntry, ...(JSON.parse(window.localStorage.getItem('auditTrailEntries') || '[]') || [])]),
     )
 
     setJustSaved(true)
@@ -107,15 +181,17 @@ export default function ManageLeather() {
 
   return (
     <div>
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-surface">
-          <Plus size={20} strokeWidth={2.5} />
-        </div>
-        <div>
-          <h1 className="text-2xl font-extrabold text-on-surface">Add New Leather Batch</h1>
-          <p className="mt-0.5 text-sm text-on-surface-variant">
-            Register incoming stock into the central inventory system.
-          </p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-surface">
+            <Plus size={20} strokeWidth={2.5} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-extrabold text-on-surface">Add New Leather Batch</h1>
+            <p className="mt-0.5 text-sm text-on-surface-variant">
+              Register incoming stock into the central inventory system.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -349,7 +425,10 @@ export default function ManageLeather() {
 
       <div className="mt-6 overflow-hidden rounded-xl border border-outline-variant bg-surface shadow-card">
         <div className="flex items-center justify-between border-b border-outline-variant px-5 py-4">
-          <h3 className="text-sm font-bold text-on-surface">Recently Added</h3>
+          <div>
+            <h3 className="text-sm font-bold text-on-surface">Recently Added</h3>
+            <p className="text-xs text-on-surface-variant">Newest leather batches added to the system.</p>
+          </div>
           <button
             type="button"
             onClick={() => navigate('/manage-leather/history')}
@@ -368,30 +447,210 @@ export default function ManageLeather() {
                 <th className="px-5 py-3">Size</th>
                 <th className="px-5 py-3">Status</th>
                 <th className="px-5 py-3">Added</th>
+                <th className="px-5 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {recentlyAdded.map((row) => (
-                <tr
-                  key={`${row.batch_code}-${row.added}`}
-                  className="border-b border-outline-variant last:border-0"
-                >
-                  <td className="px-5 py-3 font-semibold text-on-surface">{row.batch_code}</td>
-                  <td className="px-5 py-3 text-on-surface-variant">{row.material_name}</td>
-                  <td className="px-5 py-3 text-on-surface-variant">{row.leather_type}</td>
-                  <td className="px-5 py-3 text-on-surface-variant">
-                    {formatNumber(row.size_sqft, 1)} {unitForType(row.leather_type)}
+              {recentlyAdded.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-on-surface-variant">
+                    No recently added batches yet.
                   </td>
-                  <td className="px-5 py-3">
-                    <StatusPill status={row.status} />
-                  </td>
-                  <td className="px-5 py-3 text-on-surface-variant">{row.added}</td>
                 </tr>
-              ))}
+              ) : (
+                recentlyAdded.map((row) => (
+                  <tr
+                    key={`${row.batch_code}-${row.added}`}
+                    className="border-b border-outline-variant last:border-0"
+                  >
+                    <td className="px-5 py-3 font-semibold text-on-surface">{row.batch_code}</td>
+                    <td className="px-5 py-3 text-on-surface-variant">{row.material_name}</td>
+                    <td className="px-5 py-3 text-on-surface-variant">{row.leather_type}</td>
+                    <td className="px-5 py-3 text-on-surface-variant">
+                      {formatNumber(row.size_sqft, 1)} {unitForType(row.leather_type)}
+                    </td>
+                    <td className="px-5 py-3">
+                      <StatusPill status={row.status} />
+                    </td>
+                    <td className="px-5 py-3 text-on-surface-variant">{row.added}</td>
+                    <td className="px-5 py-3 text-right">
+                      <div className="inline-flex items-center gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(row)}
+                          className="rounded-lg border border-outline-variant bg-surface px-3 py-1 text-xs font-semibold text-on-surface hover:border-primary hover:text-primary"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteEntry(row.batch_code)}
+                          className="rounded-lg border border-outline-variant bg-surface px-3 py-1 text-xs font-semibold text-on-surface hover:border-danger hover:text-danger"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {editingEntry && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl border border-outline-variant bg-surface p-6 shadow-2xl">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-on-surface">Edit Batch {editingEntry.batch_code}</h2>
+                <p className="text-sm text-on-surface-variant">Update the batch details and save changes.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeEditModal}
+                className="rounded-full border border-outline-variant bg-surface px-3 py-2 text-on-surface-variant hover:border-primary hover:text-primary"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-semibold text-on-surface-variant">Batch Code</label>
+                <input
+                  type="text"
+                  value={editingEntry.batch_code}
+                  disabled
+                  className="mt-2 w-full cursor-not-allowed rounded-xl border border-outline-variant bg-surface/90 px-3 py-2 text-sm text-on-surface-variant"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-on-surface-variant">Material Name</label>
+                <input
+                  type="text"
+                  value={editData.material_name}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, material_name: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-on-surface-variant">Leather Type</label>
+                <select
+                  value={editData.leather_type}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, leather_type: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  {LEATHER_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-on-surface-variant">Quantity</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={editData.quantity}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, quantity: Number(e.target.value) }))}
+                  className="mt-2 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-on-surface-variant">Sale Price</label>
+                <div className="relative mt-2">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-on-surface-variant">
+                    ₱
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editData.salePrice}
+                    onChange={(e) => setEditData((prev) => ({ ...prev, salePrice: Number(e.target.value) }))}
+                    className="w-full rounded-xl border border-outline-variant bg-surface px-10 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-on-surface-variant">Size ({editUnit})</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editData.size_sqft}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, size_sqft: Number(e.target.value) }))}
+                  className="mt-2 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-on-surface-variant">Unit Price</label>
+                <div className="relative mt-2">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-on-surface-variant">
+                    ₱
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editData.unitPrice}
+                    onChange={(e) => setEditData((prev) => ({ ...prev, unitPrice: Number(e.target.value) }))}
+                    className="w-full rounded-xl border border-outline-variant bg-surface px-10 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-semibold text-on-surface-variant">Source / Company</label>
+                <input
+                  type="text"
+                  value={editData.source}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, source: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-on-surface-variant">Status</label>
+                <select
+                  value={editData.status}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, status: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  {STATUS_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeEditModal}
+                className="rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEdit}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-surface transition-colors hover:bg-primary-dark"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

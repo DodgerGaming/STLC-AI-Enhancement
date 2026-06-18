@@ -1,8 +1,10 @@
 import { X, MapPin, ShoppingBag } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { useCart } from '../context/CartContext.jsx'
 import { formatPeso, formatNumber } from '../utils/format.js'
 
 export default function OrderSummaryModal() {
+  const navigate = useNavigate()
   const {
     items,
     itemCount,
@@ -12,12 +14,19 @@ export default function OrderSummaryModal() {
     deliveryAddress,
     scheduledDate,
     scheduledTime,
+    paymentMethod,
     itemsSubtotal,
+    shipping,
     total,
     isSummaryOpen,
     closeSummary,
     confirmSale,
   } = useCart()
+
+  const handleConfirmSale = () => {
+    confirmSale()
+    navigate('/dashboard')
+  }
 
   if (!isSummaryOpen) return null
 
@@ -91,7 +100,7 @@ export default function OrderSummaryModal() {
             </div>
           </div>
 
-          {fulfillment === 'Delivery' && (
+          {(fulfillment === 'Delivery' || fulfillment === 'Pick-up') && (
             <div className="mt-5 rounded-xl border border-outline-variant bg-surface-variant/50 px-4 py-4 text-sm text-on-surface">
               <div className="space-y-3">
                 <div>
@@ -118,6 +127,10 @@ export default function OrderSummaryModal() {
                     <p className="font-semibold text-on-surface">{scheduledTime || '—'}</p>
                   </div>
                 </div>
+                <div>
+                  <p className="text-xs text-on-surface-variant">Payment Method</p>
+                  <p className="font-semibold text-on-surface">{paymentMethod || '—'}</p>
+                </div>
               </div>
             </div>
           )}
@@ -129,6 +142,12 @@ export default function OrderSummaryModal() {
               <span>Items Subtotal ({itemCount} {itemCount === 1 ? 'unit' : 'units'})</span>
               <span>{formatPeso(itemsSubtotal)}</span>
             </div>
+            {shipping > 0 && (
+              <div className="flex justify-between text-on-surface-variant">
+                <span>Shipping Fee</span>
+                <span>{formatPeso(shipping)}</span>
+              </div>
+            )}
             <div className="flex justify-between border-t border-outline-variant pt-1.5 text-base font-bold text-on-surface">
               <span>Total Amount</span>
               <span>{formatPeso(total)}</span>
@@ -138,7 +157,7 @@ export default function OrderSummaryModal() {
           <button
             type="button"
             disabled={items.length === 0}
-            onClick={confirmSale}
+            onClick={handleConfirmSale}
             className="mt-4 w-full rounded-lg bg-primary py-2.5 text-sm font-bold text-surface transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
             Confirm &amp; Save Sale

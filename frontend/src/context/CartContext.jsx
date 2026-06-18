@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState, useCallback } from 'react'
 
 const CartContext = createContext(null)
+const SHIPPING_FEE = 250 // Shipping fee in pesos for delivery orders
 
 export function CartProvider({ children }) {
   const [items, setItems] = useState([])
@@ -10,6 +11,7 @@ export function CartProvider({ children }) {
   const [deliveryAddress, setDeliveryAddress] = useState('')
   const [scheduledDate, setScheduledDate] = useState('')
   const [scheduledTime, setScheduledTime] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('Cash')
   const [isSummaryOpen, setIsSummaryOpen] = useState(false)
   const [lastConfirmation, setLastConfirmation] = useState(null)
 
@@ -47,6 +49,7 @@ export function CartProvider({ children }) {
     setDeliveryAddress('')
     setScheduledDate('')
     setScheduledTime('')
+    setPaymentMethod('Cash')
     setFulfillment('')
   }, [])
 
@@ -59,8 +62,8 @@ export function CartProvider({ children }) {
     () => items.reduce((sum, it) => sum + it.unitPrice * it.qty, 0),
     [items],
   )
-  const shipping = 0
-  const total = itemsSubtotal
+  const shipping = useMemo(() => (fulfillment === 'Delivery' ? SHIPPING_FEE : 0), [fulfillment])
+  const total = useMemo(() => itemsSubtotal + shipping, [itemsSubtotal, shipping])
   const itemCount = useMemo(() => items.reduce((sum, it) => sum + it.qty, 0), [items])
 
   const confirmSale = useCallback(() => {
@@ -94,6 +97,8 @@ export function CartProvider({ children }) {
     setScheduledDate,
     scheduledTime,
     setScheduledTime,
+    paymentMethod,
+    setPaymentMethod,
     itemsSubtotal,
     shipping,
     total,
