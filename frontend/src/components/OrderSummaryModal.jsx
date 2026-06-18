@@ -57,6 +57,14 @@ export default function OrderSummaryModal() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
+          {/* Customer + order details banner */}
+          {customerName && (
+            <div className="mb-4 rounded-xl border border-outline-variant bg-surface-variant/50 px-4 py-3">
+              <p className="text-xs text-on-surface-variant">Customer</p>
+              <p className="mt-0.5 text-base font-bold text-on-surface">{customerName}</p>
+            </div>
+          )}
+
           {items.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
               <ShoppingBag size={28} className="text-on-surface-variant" />
@@ -67,33 +75,40 @@ export default function OrderSummaryModal() {
           ) : (
             <ul className="space-y-3">
               {items.map((item) => (
-                <li key={item.id} className="flex items-start gap-3">
-                  <span
-                    className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: item.color }}
-                  />
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-on-surface">{item.materialName}</p>
-                    <p className="text-xs text-on-surface-variant">Batch: {item.batchCode}</p>
+                <li key={item.id} className="rounded-lg border border-outline-variant bg-surface-variant/30 p-3">
+                  <div className="flex items-start gap-3">
+                    <span
+                      className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-on-surface">{item.materialName}</p>
+                      <p className="text-xs text-on-surface-variant">Batch: {item.batchCode}</p>
+                      {item.customSize && (
+                        <p className="mt-0.5 text-xs font-semibold text-primary">
+                          Requested size: {item.customSize}
+                        </p>
+                      )}
+                      <p className="mt-0.5 text-xs text-on-surface-variant">
+                        Batch size: {formatNumber(item.sizeSqft, 2)} {item.unit} &times; {item.qty} hide{item.qty !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-bold text-on-surface">
+                        {formatPeso(item.unitPrice * item.qty)}
+                      </p>
+                      <p className="text-xs text-on-surface-variant">{formatPeso(item.unitPrice)} / {item.unit}</p>
+                    </div>
                   </div>
-                  <div className="text-right text-xs text-on-surface-variant">
-                    <p>
-                      {formatNumber(item.sizeSqft, 2)} {item.unit} &times; {item.qty}
-                    </p>
-                    <p>{formatPeso(item.unitPrice)}</p>
-                  </div>
-                  <p className="w-20 shrink-0 text-right text-sm font-semibold text-on-surface">
-                    {formatPeso(item.unitPrice * item.qty)}
-                  </p>
                 </li>
               ))}
             </ul>
           )}
 
-          <div className="mt-5 flex items-center justify-between rounded-lg border border-outline-variant bg-surface-variant/50 px-4 py-3">
+          <div className="mt-4 flex items-center justify-between rounded-lg border border-outline-variant bg-surface-variant/50 px-4 py-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-on-surface">
               <MapPin size={16} className="text-primary" />
-              Fulfillment Method
+              Fulfillment
             </div>
             <div className="rounded-md border border-outline-variant bg-surface px-3 py-1 text-sm font-semibold text-on-surface">
               {fulfillment || '—'}
@@ -101,19 +116,20 @@ export default function OrderSummaryModal() {
           </div>
 
           {(fulfillment === 'Delivery' || fulfillment === 'Pick-up') && (
-            <div className="mt-5 rounded-xl border border-outline-variant bg-surface-variant/50 px-4 py-4 text-sm text-on-surface">
+            <div className="mt-4 rounded-xl border border-outline-variant bg-surface-variant/50 px-4 py-4 text-sm text-on-surface">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wide text-on-surface-variant">
+                {fulfillment} Details
+              </p>
               <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-on-surface-variant">Customer</p>
-                  <p className="font-semibold text-on-surface">{customerName || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-on-surface-variant">Description</p>
-                  <p className="font-semibold text-on-surface">{orderDescription || '—'}</p>
-                </div>
+                {orderDescription && (
+                  <div>
+                    <p className="text-xs text-on-surface-variant">Order Description</p>
+                    <p className="font-semibold text-on-surface">{orderDescription}</p>
+                  </div>
+                )}
                 {fulfillment === 'Delivery' && (
                   <div>
-                    <p className="text-xs text-on-surface-variant">Address</p>
+                    <p className="text-xs text-on-surface-variant">Delivery Address</p>
                     <p className="font-semibold text-on-surface">{deliveryAddress || '—'}</p>
                   </div>
                 )}

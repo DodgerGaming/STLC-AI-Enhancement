@@ -20,6 +20,7 @@ export default function LeatherDetail() {
   const [detailsModalOpen, setDetailsModalOpen] = useState(false)
   const [validationMessage, setValidationMessage] = useState('')
   const [attemptedSubmit, setAttemptedSubmit] = useState(false)
+  const [customSize, setCustomSize] = useState('')
 
   const {
     fulfillment,
@@ -155,6 +156,7 @@ export default function LeatherDetail() {
     materialName: material.material_name,
     batchCode: selectedBatch?.batch_code,
     sizeSqft: selectedBatch?.size_sqft ?? 0,
+    customSize: customSize.trim() || null,
     unit: material.unit,
     unitPrice: material.sale_price,
     qty: quantity,
@@ -383,6 +385,24 @@ export default function LeatherDetail() {
                       rows={2}
                       className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-on-surface-variant">
+                      Customer's Requested Size
+                    </label>
+                    <input
+                      type="text"
+                      value={customSize}
+                      onChange={(e) => setCustomSize(e.target.value)}
+                      placeholder={`e.g. 10 ${material.unit} or 2.5m × 1m`}
+                      className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    {selectedBatch && (
+                      <p className="mt-1 text-xs text-on-surface-variant">
+                        Batch size: {formatNumber(selectedBatch.size_sqft, 2)} {material.unit}
+                      </p>
+                    )}
                   </div>
 
                   {fulfillment === 'Delivery' && (
