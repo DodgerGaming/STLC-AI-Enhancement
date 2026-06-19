@@ -1,4 +1,5 @@
 import { createContext, useContext, useMemo, useState, useCallback } from 'react'
+import { createOrder } from '../data/apiLeather.js'
 
 const CartContext = createContext(null)
 const SHIPPING_FEE = 250 // Shipping fee in pesos for delivery orders
@@ -11,7 +12,7 @@ export function CartProvider({ children }) {
   const [deliveryAddress, setDeliveryAddress] = useState('')
   const [scheduledDate, setScheduledDate] = useState('')
   const [scheduledTime, setScheduledTime] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState('Cash')
+  const [paymentMethod, setPaymentMethod] = useState('Over the Counter')
   const [isSummaryOpen, setIsSummaryOpen] = useState(false)
   const [lastConfirmation, setLastConfirmation] = useState(null)
 
@@ -20,7 +21,10 @@ export function CartProvider({ children }) {
   const addToCart = useCallback((line) => {
     setItems((prev) => {
       const existingIndex = prev.findIndex(
-        (it) => it.materialId === line.materialId && it.batchCode === line.batchCode,
+        (it) =>
+          it.materialId === line.materialId &&
+          it.batchCode === line.batchCode &&
+          it.customSize === (line.customSize || ''),
       )
       if (existingIndex !== -1) {
         const next = [...prev]
@@ -49,7 +53,7 @@ export function CartProvider({ children }) {
     setDeliveryAddress('')
     setScheduledDate('')
     setScheduledTime('')
-    setPaymentMethod('Cash')
+    setPaymentMethod('Over the Counter')
     setFulfillment('')
   }, [])
 
@@ -62,22 +66,47 @@ export function CartProvider({ children }) {
     () => items.reduce((sum, it) => sum + it.unitPrice * it.qty, 0),
     [items],
   )
+  const cuttingFee = useMemo(
+    () => items.reduce((sum, it) => sum + (it.customSize ? 50 : 0), 0),
+    [items],
+  )
   const shipping = useMemo(() => (fulfillment === 'Delivery' ? SHIPPING_FEE : 0), [fulfillment])
-  const total = useMemo(() => itemsSubtotal + shipping, [itemsSubtotal, shipping])
+  const total = useMemo(() => itemsSubtotal + shipping + cuttingFee, [itemsSubtotal, shipping, cuttingFee])
   const itemCount = useMemo(() => items.reduce((sum, it) => sum + it.qty, 0), [items])
 
-  const confirmSale = useCallback(() => {
+  const confirmSale = useCallback(async () => {
+    const payload = {
+      customer: customerName,
+      fulfillment,
+      delivery_address: deliveryAddress,
+      order_description: orderDescription,
+      scheduled_date: scheduledDate || null,
+      scheduled_time: scheduledTime || null,
+      payment_method: paymentMethod,
+      items: items.map((item) => ({
+        material_name: item.materialName,
+        batch_code: item.batchCode,
+        unit: item.unit,
+        unit_price: item.unitPrice,
+        qty: item.qty,
+        size_sqft: item.sizeSqft,
+        custom_size: item.customSize || '',
+        color: item.color || '',
+      })),
+    }
+
+    const orderResponse = await createOrder(payload)
+
     setLastConfirmation({
-      transactionId: `CW-${Math.floor(7000 + Math.random() * 999)}-${String.fromCharCode(
-        65 + Math.floor(Math.random() * 26),
-      )}`,
-      total,
-      itemCount,
+      transactionId: orderResponse.order_id,
+      total: Number(orderResponse.total),
+      itemCount: Number(orderResponse.item_count),
     })
     clearCart()
     clearOrderDetails()
     setIsSummaryOpen(false)
-  }, [total, itemCount, clearCart, clearOrderDetails])
+    return orderResponse
+  }, [customerName, fulfillment, deliveryAddress, orderDescription, scheduledDate, scheduledTime, paymentMethod, items, clearCart, clearOrderDetails])
 
   const value = {
     items,

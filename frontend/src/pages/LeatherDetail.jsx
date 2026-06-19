@@ -1,26 +1,56 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Minus, Plus, ShoppingCart, ArrowLeft } from 'lucide-react'
 import HideInventoryTable from '../components/HideInventoryTable.jsx'
 import leatherPlaceholder from '../assets/leather-placeholder.jpg'
 import { useCart } from '../context/CartContext.jsx'
-import { getMaterialById, getBatchesForMaterial } from '../data/mockLeather.js'
+import { fetchMaterialById, fetchBatchesForMaterial } from '../data/apiLeather.js'
 import { formatPeso, formatNumber } from '../utils/format.js'
 
 export default function LeatherDetail() {
   const { materialId } = useParams()
   const navigate = useNavigate()
-  const material = getMaterialById(materialId)
-  const batches = useMemo(() => getBatchesForMaterial(materialId), [materialId])
+  const [material, setMaterial] = useState(null)
+  const [batches, setBatches] = useState([])
+  const [loadingData, setLoadingData] = useState(true)
+  const [pageError, setPageError] = useState('')
 
-  const firstAvailable = batches.find((b) => b.status === 'Available')
-  const [selectedBatchCode, setSelectedBatchCode] = useState(firstAvailable?.batch_code ?? '')
+  const [selectedBatchCode, setSelectedBatchCode] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [swatchIndex, setSwatchIndex] = useState(0)
   const [detailsModalOpen, setDetailsModalOpen] = useState(false)
   const [validationMessage, setValidationMessage] = useState('')
   const [attemptedSubmit, setAttemptedSubmit] = useState(false)
-  const [customSize, setCustomSize] = useState('')
+  const [cutOption, setCutOption] = useState('No cutting')
+  const [customWidth, setCustomWidth] = useState('')
+  const [customHeight, setCustomHeight] = useState('')
+  const firstAvailable = batches.find((b) => b.status === 'Available')
+
+  useEffect(() => {
+    let active = true
+    setLoadingData(true)
+    setPageError('')
+
+    Promise.all([fetchMaterialById(materialId), fetchBatchesForMaterial(materialId)])
+      .then(([materialData, batchesData]) => {
+        if (!active) return
+        setMaterial(materialData)
+        setBatches(batchesData)
+        setSelectedBatchCode('')
+      })
+      .catch((error) => {
+        if (!active) return
+        setPageError(error.message || 'Unable to load material details')
+      })
+      .finally(() => {
+        if (!active) return
+        setLoadingData(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [materialId])
 
   const {
     fulfillment,
@@ -41,11 +71,36 @@ export default function LeatherDetail() {
     openSummary,
   } = useCart()
 
-  if (!material) {
+  const selectedBatch = batches.find((b) => b.batch_code === selectedBatchCode)
+  const hasStock = Boolean(firstAvailable)
+
+  const getAutoDescription = () => {
+    if (!selectedBatch || !material) return ''
+    return `Full hide - ${formatNumber(selectedBatch.size_sqft, 2)} ${material.unit} per hide`
+  }
+
+  // keep order description in sync with selection and material description.
+  // IMPORTANT: this must stay above the early `return`s below — all hooks need to
+  // run on every render (even while loading/erroring) or React throws "Rendered
+  // more hooks than during the previous render."
+  useEffect(() => {
+    const composed = (material?.description ? material.description + ' ' : '') + (getAutoDescription() || '')
+    setOrderDescription(composed.trim())
+  }, [material, selectedBatch, setOrderDescription])
+
+  if (loadingData) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <p className="text-sm text-on-surface-variant">Loading material details…</p>
+      </div>
+    )
+  }
+
+  if (pageError || !material) {
     return (
       <div className="flex flex-col items-center gap-3 py-20 text-center">
         <p className="text-sm text-on-surface-variant">
-          We couldn’t find a material with that ID.
+          {pageError || 'We couldn’t find a material with that ID.'}
         </p>
         <button
           type="button"
@@ -57,9 +112,6 @@ export default function LeatherDetail() {
       </div>
     )
   }
-
-  const selectedBatch = batches.find((b) => b.batch_code === selectedBatchCode)
-  const hasStock = Boolean(firstAvailable)
 
   const orderReady =
     hasStock &&
@@ -90,6 +142,7 @@ export default function LeatherDetail() {
 
   const getOrderValidationMessage = () => {
     if (!hasStock) return 'Select an available batch before buying.'
+    if (!selectedBatch) return 'Select a hide / batch before buying.'
     if (!customerName.trim()) return 'Enter the customer name to continue.'
     if (!fulfillment) return 'Choose Delivery or Pick-up to proceed.'
     if (fulfillment === 'Delivery') {
@@ -107,6 +160,11 @@ export default function LeatherDetail() {
       }
       if (!paymentMethod) {
         return 'Select a payment method.'
+      }
+    }
+    if (cutOption === 'Cut leather') {
+      if (!customWidth.trim() || !customHeight.trim()) {
+        return 'Enter the requested width and height for cutting.'
       }
     }
     if (fulfillment === 'Pick-up') {
@@ -156,11 +214,11 @@ export default function LeatherDetail() {
     materialName: material.material_name,
     batchCode: selectedBatch?.batch_code,
     sizeSqft: selectedBatch?.size_sqft ?? 0,
-    customSize: customSize.trim() || null,
     unit: material.unit,
     unitPrice: material.sale_price,
     qty: quantity,
     color: material.tint,
+    customSize: cutOption === 'Cut leather' ? `${customWidth.trim()} x ${customHeight.trim()}` : '',
   })
 
   const closeDetailsModal = () => {
@@ -184,7 +242,7 @@ export default function LeatherDetail() {
   }
 
   return (
-    <div>
+    <div className="bg-background">
       <button
         type="button"
         onClick={() => navigate('/sales')}
@@ -273,6 +331,9 @@ export default function LeatherDetail() {
               onChange={(e) => setSelectedBatchCode(e.target.value)}
               className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             >
+              <option value="" disabled>
+                Choose Hide / Batch
+              </option>
               {batches.map((b) => (
                 <option key={b.batch_code} value={b.batch_code} disabled={b.status !== 'Available'}>
                   Batch {b.batch_code} — {formatNumber(b.size_sqft, 2)} {material.unit} available
@@ -282,30 +343,90 @@ export default function LeatherDetail() {
             </select>
           </div>
 
-          <div className="mt-5">
-            <label className="text-sm font-semibold text-on-surface-variant">
-              Quantity
-            </label>
-            <div className="mt-1.5 flex w-fit items-center rounded-lg border border-outline-variant">
-              <button
-                type="button"
-                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                className="flex h-10 w-10 items-center justify-center text-on-surface-variant hover:text-primary"
+          <div className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,auto)_minmax(240px,1fr)] items-end">
+            <div>
+              <label className="text-sm font-semibold text-on-surface-variant">
+                Quantity
+              </label>
+              <div className="mt-1.5 flex w-fit items-center rounded-lg border border-outline-variant">
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  className="flex h-10 w-10 items-center justify-center text-on-surface-variant hover:text-primary"
+                >
+                  <Minus size={16} />
+                </button>
+                <span className="w-12 text-center text-sm font-semibold text-on-surface">
+                  {quantity}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => Math.min(99, q + 1))}
+                  className="flex h-10 w-10 items-center justify-center text-on-surface-variant hover:text-primary"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-on-surface-variant">
+                Cutting Option
+              </label>
+              <select
+                value={cutOption}
+                onChange={(e) => {
+                  setCutOption(e.target.value)
+                  if (e.target.value !== 'Cut leather') {
+                    setCustomWidth('')
+                    setCustomHeight('')
+                  }
+                }}
+                className="mt-1.5 h-10 w-auto min-w-[160px] rounded-lg border border-outline-variant bg-surface px-3 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
-                <Minus size={16} />
-              </button>
-              <span className="w-12 text-center text-sm font-semibold text-on-surface">
-                {quantity}
-              </span>
-              <button
-                type="button"
-                onClick={() => setQuantity((q) => Math.min(99, q + 1))}
-                className="flex h-10 w-10 items-center justify-center text-on-surface-variant hover:text-primary"
-              >
-                <Plus size={16} />
-              </button>
+                <option value="No cutting">No cutting</option>
+                <option value="Cut leather">Cut leather</option>
+              </select>
             </div>
           </div>
+
+          {cutOption === 'Cut leather' && (
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="text-sm font-semibold text-on-surface-variant">
+                  Requested Width
+                </label>
+                <div className="relative mt-1.5">
+                  <input
+                    type="text"
+                    value={customWidth}
+                    onChange={(e) => setCustomWidth(e.target.value)}
+                    placeholder="Width"
+                    className="w-full rounded-lg border border-outline-variant bg-surface py-2 pl-3 pr-12 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-semibold text-on-surface-variant">
+                    sqft
+                  </span>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-on-surface-variant">
+                  Requested Height
+                </label>
+                <div className="relative mt-1.5">
+                  <input
+                    type="text"
+                    value={customHeight}
+                    onChange={(e) => setCustomHeight(e.target.value)}
+                    placeholder="Height"
+                    className="w-full rounded-lg border border-outline-variant bg-surface py-2 pl-3 pr-12 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-semibold text-on-surface-variant">
+                    sqft
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mt-5">
             <label className="text-sm font-semibold text-on-surface-variant">
@@ -377,27 +498,11 @@ export default function LeatherDetail() {
                 <div className="space-y-5">
                   <div>
                     <label className="text-sm font-semibold text-on-surface-variant">
-                      Description of the leather
+                      Order Description
                     </label>
-                    <textarea
-                      value={orderDescription}
-                      onChange={(e) => setOrderDescription(e.target.value)}
-                      rows={2}
-                      className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-semibold text-on-surface-variant">
-                      Customer's Requested Size
-                    </label>
-                    <input
-                      type="text"
-                      value={customSize}
-                      onChange={(e) => setCustomSize(e.target.value)}
-                      placeholder={`e.g. 10 ${material.unit} or 2.5m × 1m`}
-                      className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
+                    <div className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface-variant/40 px-3 py-2.5 text-sm text-on-surface">
+                      {(material.description ? material.description + ' ' : '') + (getAutoDescription() || '')}
+                    </div>
                     {selectedBatch && (
                       <p className="mt-1 text-xs text-on-surface-variant">
                         Batch size: {formatNumber(selectedBatch.size_sqft, 2)} {material.unit}
@@ -428,7 +533,7 @@ export default function LeatherDetail() {
                       Payment Method
                     </label>
                     <div className="mt-1.5 flex flex-wrap gap-2">
-                      {['Cash', 'Bank Transfer', 'Gcash', 'Credit Card'].map((method) => (
+                      {['Over the Counter', 'Online Payment', 'COD'].map((method) => (
                         <button
                           key={method}
                           type="button"

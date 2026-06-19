@@ -6,7 +6,7 @@ import { hideBatches, LEATHER_TYPES, unitForType } from '../data/mockLeather.js'
 import { formatNumber } from '../utils/format.js'
 
 const STORAGE_KEY = 'manageLeatherHistory'
-const STATUS_OPTIONS = ['All', 'Available', 'Processing', 'Reserved', 'Depleted']
+const STATUS_OPTIONS = ['All', 'Available', 'Out of Stock']
 
 const inputClass =
   'w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20'
@@ -52,6 +52,8 @@ function loadHistory() {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed) || parsed.length === 0) return buildSampleHistory()
     return parsed
+      .map((item) => ({ ...item, addedAt: item.addedAt ?? Date.now() }))
+      .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
   } catch {
     return buildSampleHistory()
   }

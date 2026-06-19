@@ -3,9 +3,10 @@ import { Plus, ImagePlus, Save, BadgeCheck, ChevronRight, ArrowLeft, Pencil, Tra
 import { useNavigate } from 'react-router-dom'
 import StatusPill from '../components/StatusPill.jsx'
 import { hideBatches, LEATHER_TYPES, unitForType } from '../data/mockLeather.js'
+import { createBatch } from '../data/apiLeather.js'
 import { formatPeso, formatNumber } from '../utils/format.js'
 
-const STATUS_OPTIONS = ['Available', 'Processing', 'Reserved']
+const STATUS_OPTIONS = ['Available']
 
 const inputClass =
   'w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20'
@@ -20,22 +21,49 @@ function agoToHours(ago) {
   return value * multiplier
 }
 
-function buildInitialRecentlyAdded() {
+const STORAGE_KEY = 'manageLeatherHistory'
+
+function mapBatchToHistory(batch) {
+  return {
+    batch_code: batch.batch_code,
+    material_name: batch.material_name,
+    leather_type: batch.leather_type,
+    size_sqft: batch.size_sqft,
+    quantity: batch.quantity,
+    salePrice: batch.sale_price,
+    unitPrice: batch.unit_price,
+    source: batch.company,
+    status: batch.status,
+    added: batch.added,
+    addedAt: batch.addedAt ?? Date.now() - agoToHours(batch.added) * 60 * 60 * 1000,
+  }
+}
+
+function buildSampleHistory() {
   return [...hideBatches]
-    .sort((a, b) => agoToHours(a.added) - agoToHours(b.added))
-    .slice(0, 5)
-    .map((b) => ({
-      batch_code: b.batch_code,
-      material_name: b.material_name,
-      size_sqft: b.size_sqft,
-      leather_type: b.leather_type,
-      quantity: b.quantity,
-      salePrice: b.sale_price,
-      unitPrice: b.unit_price,
-      source: b.company,
-      status: b.status,
-      added: b.added,
+    .map(mapBatchToHistory)
+    .sort((a, b) => b.addedAt - a.addedAt)
+}
+
+function loadHistory() {
+  if (typeof window === 'undefined') return buildSampleHistory()
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return buildSampleHistory()
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed) || parsed.length === 0) return buildSampleHistory()
+    return parsed.map((item) => ({
+      ...item,
+      addedAt: item.addedAt ?? Date.now(),
     }))
+  } catch {
+    return buildSampleHistory()
+  }
+}
+
+function recentFromHistory(historyItems) {
+  return [...historyItems].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)).slice(0, 5)
 }
 
 export default function ManageLeather() {
@@ -44,6 +72,7 @@ export default function ManageLeather() {
   const [batchCode, setBatchCode] = useState('')
   const [materialName, setMaterialName] = useState('')
   const [leatherType, setLeatherType] = useState(LEATHER_TYPES[0])
+  const [description, setDescription] = useState('')
   const [quantity, setQuantity] = useState('')
   const [salePrice, setSalePrice] = useState('')
   const [status, setStatus] = useState('Available')
@@ -54,8 +83,9 @@ export default function ManageLeather() {
   const [previewUrl, setPreviewUrl] = useState(null)
 
   const navigate = useNavigate()
-  const [recentlyAdded, setRecentlyAdded] = useState(buildInitialRecentlyAdded)
+  const [recentlyAdded, setRecentlyAdded] = useState(() => recentFromHistory(loadHistory()))
   const [justSaved, setJustSaved] = useState(false)
+  const [errors, setErrors] = useState({})
   const [editingEntry, setEditingEntry] = useState(null)
   const [editData, setEditData] = useState({})
 
@@ -70,6 +100,22 @@ export default function ManageLeather() {
     const file = e.target.files?.[0]
     if (!file) return
     setPreviewUrl(URL.createObjectURL(file))
+    if (errors.image) setErrors((prev) => ({ ...prev, image: '' }))
+  }
+
+  const getValidationErrors = () => {
+    const newErrors = {}
+
+    if (!batchCode.trim()) newErrors.batchCode = 'Batch Code is required'
+    if (!materialName.trim()) newErrors.materialName = 'Material Name is required'
+    if (!quantity || Number(quantity) <= 0) newErrors.quantity = 'Quantity must be greater than 0'
+    if (!salePrice || Number(salePrice) <= 0) newErrors.salePrice = 'Sale Price must be greater than 0'
+    if (!unitPrice || Number(unitPrice) <= 0) newErrors.unitPrice = 'Unit Price must be greater than 0'
+    if (!source.trim()) newErrors.source = 'Source/Company is required'
+    if (!previewUrl) newErrors.image = 'Image is required'
+    if (sizeSqft && Number(sizeSqft) <= 0) newErrors.sizeSqft = 'Size must be greater than 0'
+
+    return newErrors
   }
 
   const openEditModal = (item) => {
@@ -77,6 +123,7 @@ export default function ManageLeather() {
     setEditData({
       material_name: item.material_name,
       leather_type: item.leather_type,
+      description: item.description || '',
       size_sqft: item.size_sqft,
       quantity: item.quantity,
       salePrice: item.salePrice,
@@ -98,11 +145,12 @@ export default function ManageLeather() {
     )
     setRecentlyAdded(updated)
 
-    const history = JSON.parse(window.localStorage.getItem('manageLeatherHistory') || '[]') || []
+    const history = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') || []
     const updatedHistory = history.map((item) =>
       item.batch_code === editingEntry.batch_code ? { ...item, ...editData } : item,
     )
-    window.localStorage.setItem('manageLeatherHistory', JSON.stringify(updatedHistory))
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory))
+    setRecentlyAdded(recentFromHistory(updatedHistory))
 
     const auditEntry = {
       id: Date.now(),
@@ -122,15 +170,17 @@ export default function ManageLeather() {
     const updated = recentlyAdded.filter((item) => item.batch_code !== batchCode)
     setRecentlyAdded(updated)
 
-    const history = JSON.parse(window.localStorage.getItem('manageLeatherHistory') || '[]') || []
+    const history = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') || []
     const nextHistory = history.filter((item) => item.batch_code !== batchCode)
-    window.localStorage.setItem('manageLeatherHistory', JSON.stringify(nextHistory))
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextHistory))
+    setRecentlyAdded(recentFromHistory(nextHistory))
   }
 
   const resetForm = () => {
     setBatchCode('')
     setMaterialName('')
     setLeatherType(LEATHER_TYPES[0])
+    setDescription('')
     setQuantity('')
     setSalePrice('')
     setStatus('Available')
@@ -142,12 +192,20 @@ export default function ManageLeather() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!batchCode.trim() || !materialName.trim()) return
+    const validationErrors = getValidationErrors()
+    
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors)
+      return
+    }
+
+    setErrors({})
 
     const newEntry = {
       batch_code: batchCode.trim(),
       material_name: materialName.trim(),
       leather_type: leatherType,
+      description: description.trim(),
       quantity: Number(quantity) || 0,
       size_sqft: Number(sizeSqft) || 0,
       unitPrice: Number(unitPrice) || 0,
@@ -157,9 +215,26 @@ export default function ManageLeather() {
       added: 'Just now',
     }
 
-    const updatedHistory = [newEntry, ...(JSON.parse(window.localStorage.getItem('manageLeatherHistory') || '[]') || [])]
-    setRecentlyAdded((prev) => [newEntry, ...prev].slice(0, 5))
-    window.localStorage.setItem('manageLeatherHistory', JSON.stringify(updatedHistory))
+    // Send to backend API
+    createBatch({
+      batch_code: batchCode.trim(),
+      material_name: materialName.trim(),
+      leather_type: leatherType,
+      sku: batchCode.trim(),
+      quantity: Number(quantity) || 0,
+      size_sqft: Number(sizeSqft) || 0,
+      unit_price: Number(unitPrice) || 0,
+      sale_price: Number(salePrice) || 0,
+      company: source.trim(),
+      status,
+      description: description.trim(),
+      unit: unitForType(leatherType),
+    }).catch((err) => console.error('Failed to create batch in backend', err))
+
+    const history = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') || []
+    const updatedHistory = [{ ...newEntry, addedAt: Date.now() }, ...history]
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory))
+    setRecentlyAdded(recentFromHistory(updatedHistory))
 
     const auditEntry = {
       id: Date.now(),
@@ -207,11 +282,15 @@ export default function ManageLeather() {
               <input
                 type="text"
                 value={batchCode}
-                onChange={(e) => setBatchCode(e.target.value)}
+                onChange={(e) => {
+                  setBatchCode(e.target.value)
+                  if (errors.batchCode) setErrors((prev) => ({ ...prev, batchCode: '' }))
+                }}
                 placeholder="e.g. LW-2024-089"
-                className={`mt-1.5 ${inputClass}`}
+                className={`mt-1.5 ${inputClass} ${errors.batchCode ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : ''}`}
                 required
               />
+              {errors.batchCode && <p className="mt-1 text-xs text-red-500">{errors.batchCode}</p>}
             </div>
 
             <div>
@@ -219,11 +298,15 @@ export default function ManageLeather() {
               <input
                 type="text"
                 value={materialName}
-                onChange={(e) => setMaterialName(e.target.value)}
+                onChange={(e) => {
+                  setMaterialName(e.target.value)
+                  if (errors.materialName) setErrors((prev) => ({ ...prev, materialName: '' }))
+                }}
                 placeholder="e.g. Tuscan Pebbled Brown"
-                className={`mt-1.5 ${inputClass}`}
+                className={`mt-1.5 ${inputClass} ${errors.materialName ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : ''}`}
                 required
               />
+              {errors.materialName && <p className="mt-1 text-xs text-red-500">{errors.materialName}</p>}
             </div>
 
             <div>
@@ -242,20 +325,34 @@ export default function ManageLeather() {
             </div>
 
             <div>
+              <label className={labelClass}>Description</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="e.g. Premium Italian leather with natural grain finish"
+                className={`mt-1.5 min-h-24 resize-none ${inputClass}`}
+              />
+            </div>
+
+            <div>
               <label className={labelClass}>Quantity</label>
               <div className="relative mt-1.5">
                 <input
                   type="number"
                   min="0"
                   value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
+                  onChange={(e) => {
+                    setQuantity(e.target.value)
+                    if (errors.quantity) setErrors((prev) => ({ ...prev, quantity: '' }))
+                  }}
                   placeholder="0"
-                  className={`${inputClass} pr-16`}
+                  className={`${inputClass} pr-16 ${errors.quantity ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : ''}`}
                 />
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-on-surface-variant">
                   Units
                 </span>
               </div>
+              {errors.quantity && <p className="mt-1 text-xs text-red-500">{errors.quantity}</p>}
             </div>
 
             <div>
@@ -269,11 +366,15 @@ export default function ManageLeather() {
                   min="0"
                   step="0.01"
                   value={salePrice}
-                  onChange={(e) => setSalePrice(e.target.value)}
+                  onChange={(e) => {
+                    setSalePrice(e.target.value)
+                    if (errors.salePrice) setErrors((prev) => ({ ...prev, salePrice: '' }))
+                  }}
                   placeholder="0.00"
-                  className={`${inputClass} pl-7`}
+                  className={`${inputClass} pl-7 ${errors.salePrice ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : ''}`}
                 />
               </div>
+              {errors.salePrice && <p className="mt-1 text-xs text-red-500">{errors.salePrice}</p>}
             </div>
 
             <div>
@@ -339,6 +440,7 @@ export default function ManageLeather() {
                 onChange={handleFileChange}
                 className="hidden"
               />
+              {errors.image && <p className="mt-2 text-xs text-red-500">{errors.image}</p>}
 
               <div className="mt-3 grid grid-cols-2 gap-3 rounded-lg bg-surface-variant/60 p-3">
                 <div>
@@ -367,14 +469,18 @@ export default function ManageLeather() {
                   min="0"
                   step="0.01"
                   value={sizeSqft}
-                  onChange={(e) => setSizeSqft(e.target.value)}
+                  onChange={(e) => {
+                    setSizeSqft(e.target.value)
+                    if (errors.sizeSqft) setErrors((prev) => ({ ...prev, sizeSqft: '' }))
+                  }}
                   placeholder="0.00"
-                  className={`${inputClass} pr-14`}
+                  className={`${inputClass} pr-14 ${errors.sizeSqft ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : ''}`}
                 />
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-on-surface-variant">
                   {unit}
                 </span>
               </div>
+              {errors.sizeSqft && <p className="mt-1 text-xs text-red-500">{errors.sizeSqft}</p>}
             </div>
 
             <div>
@@ -388,11 +494,15 @@ export default function ManageLeather() {
                   min="0"
                   step="0.01"
                   value={unitPrice}
-                  onChange={(e) => setUnitPrice(e.target.value)}
+                  onChange={(e) => {
+                    setUnitPrice(e.target.value)
+                    if (errors.unitPrice) setErrors((prev) => ({ ...prev, unitPrice: '' }))
+                  }}
                   placeholder="0.00"
-                  className={`${inputClass} pl-7`}
+                  className={`${inputClass} pl-7 ${errors.unitPrice ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : ''}`}
                 />
               </div>
+              {errors.unitPrice && <p className="mt-1 text-xs text-red-500">{errors.unitPrice}</p>}
             </div>
 
             <div>
@@ -400,10 +510,14 @@ export default function ManageLeather() {
               <input
                 type="text"
                 value={source}
-                onChange={(e) => setSource(e.target.value)}
+                onChange={(e) => {
+                  setSource(e.target.value)
+                  if (errors.source) setErrors((prev) => ({ ...prev, source: '' }))
+                }}
                 placeholder="Supplier or Tannery"
-                className={`mt-1.5 ${inputClass}`}
+                className={`mt-1.5 ${inputClass} ${errors.source ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : ''}`}
               />
+              {errors.source && <p className="mt-1 text-xs text-red-500">{errors.source}</p>}
             </div>
           </div>
         </div>
@@ -549,6 +663,15 @@ export default function ManageLeather() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-semibold text-on-surface-variant">Description</label>
+                <textarea
+                  value={editData.description}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, description: e.target.value }))}
+                  className="mt-2 min-h-24 w-full resize-none rounded-xl border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
               </div>
 
               <div>

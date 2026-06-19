@@ -1,4 +1,9 @@
 from django.contrib import admin
-from django.urls import path
 
-# Register your models here (none yet)
+from .models import Batch, Material, Order, OrderItem
+
+
+admin.site.register(Material)
+admin.site.register(Batch)
+admin.site.register(Order)
+admin.site.register(OrderItem)

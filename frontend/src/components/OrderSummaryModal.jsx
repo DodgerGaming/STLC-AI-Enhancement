@@ -18,14 +18,19 @@ export default function OrderSummaryModal() {
     itemsSubtotal,
     shipping,
     total,
+    cuttingFee,
     isSummaryOpen,
     closeSummary,
     confirmSale,
   } = useCart()
 
-  const handleConfirmSale = () => {
-    confirmSale()
-    navigate('/dashboard')
+  const handleConfirmSale = async () => {
+    try {
+      await confirmSale()
+      navigate('/dashboard')
+    } catch (error) {
+      console.error('Order confirmation failed', error)
+    }
   }
 
   if (!isSummaryOpen) return null
@@ -86,11 +91,11 @@ export default function OrderSummaryModal() {
                       <p className="text-xs text-on-surface-variant">Batch: {item.batchCode}</p>
                       {item.customSize && (
                         <p className="mt-0.5 text-xs font-semibold text-primary">
-                          Requested size: {item.customSize}
+                          ✂️ Cutting: {item.customSize}
                         </p>
                       )}
                       <p className="mt-0.5 text-xs text-on-surface-variant">
-                        Batch size: {formatNumber(item.sizeSqft, 2)} {item.unit} &times; {item.qty} hide{item.qty !== 1 ? 's' : ''}
+                        Batch: {formatNumber(item.sizeSqft, 2)} {item.unit} &times; {item.qty} hide{item.qty !== 1 ? 's' : ''}
                       </p>
                     </div>
                     <div className="shrink-0 text-right">
@@ -158,6 +163,12 @@ export default function OrderSummaryModal() {
               <span>Items Subtotal ({itemCount} {itemCount === 1 ? 'unit' : 'units'})</span>
               <span>{formatPeso(itemsSubtotal)}</span>
             </div>
+            {cuttingFee > 0 && (
+              <div className="flex justify-between text-on-surface-variant">
+                <span>Cutting Fee</span>
+                <span>{formatPeso(cuttingFee)}</span>
+              </div>
+            )}
             {shipping > 0 && (
               <div className="flex justify-between text-on-surface-variant">
                 <span>Shipping Fee</span>

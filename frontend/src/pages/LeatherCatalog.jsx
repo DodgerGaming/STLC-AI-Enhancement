@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import MaterialCard from '../components/MaterialCard.jsx'
-import { materials } from '../data/mockLeather.js'
+import { fetchMaterials } from '../data/apiLeather.js'
 import { formatPeso } from '../utils/format.js'
 
 const TABS = [
@@ -12,8 +12,24 @@ const TABS = [
 ]
 
 export default function LeatherCatalog() {
+  const [materials, setMaterials] = useState([])
   const [query, setQuery] = useState('')
   const [activeTab, setActiveTab] = useState('All')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    fetchMaterials()
+      .then((data) => {
+        setMaterials(data)
+        setError('')
+      })
+      .catch((err) => {
+        setError(err.message || 'Failed to load materials')
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -23,7 +39,7 @@ export default function LeatherCatalog() {
         !q || m.material_name.toLowerCase().includes(q) || m.sku.toLowerCase().includes(q)
       return matchesTab && matchesQuery
     })
-  }, [query, activeTab])
+  }, [materials, query, activeTab])
 
   return (
     <div className="pb-28">
@@ -66,14 +82,24 @@ export default function LeatherCatalog() {
         ))}
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {filtered.map((material) => (
-          <MaterialCard key={material.material_id} material={material} />
-        ))}
-        {filtered.length === 0 && (
-          <p className="col-span-full py-12 text-center text-sm text-on-surface-variant">
-            No materials match “{query}”.
-          </p>
+      <div className="mt-6">
+        {loading ? (
+          <div className="py-12 text-center text-sm text-on-surface-variant">Loading materials...</div>
+        ) : error ? (
+          <div className="rounded-xl border border-error/20 bg-error/5 px-5 py-6 text-sm text-error">
+            {error}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filtered.map((material) => (
+              <MaterialCard key={material.material_id} material={material} />
+            ))}
+            {filtered.length === 0 && (
+              <p className="col-span-full py-12 text-center text-sm text-on-surface-variant">
+                No materials match “{query}”.
+              </p>
+            )}
+          </div>
         )}
       </div>
 
