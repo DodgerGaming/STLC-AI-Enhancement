@@ -23,8 +23,7 @@ class BatchSerializer(serializers.ModelSerializer):
             'unit_price',
             'company',
             'status',
-            'quality_grade',
-            'added',
+            'added_at',
         ]
 
 
@@ -38,7 +37,6 @@ class MaterialSerializer(serializers.ModelSerializer):
             'material_id',
             'material_name',
             'leather_type',
-            'sku',
             'sale_price',
             'unit_price',
             'unit',
@@ -46,8 +44,6 @@ class MaterialSerializer(serializers.ModelSerializer):
             'totalStock',
             'batchCount',
             'tag',
-            'tint',
-            'swatches',
         ]
 
 
@@ -83,9 +79,19 @@ class OrderItemSerializer(serializers.ModelSerializer):
             'custom_size',
             'color',
         ]
+    
+    def validate(self, data):
+        # Ensure required fields are present
+        required_fields = ['material_name', 'batch_code', 'unit', 'unit_price', 'qty', 'size_sqft']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise serializers.ValidationError(f"Field '{field}' is required.")
+        return data
 
 
 class OrderSerializer(serializers.ModelSerializer):
+    total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    item_count = serializers.IntegerField(read_only=True)
     items = OrderItemSerializer(many=True)
 
     class Meta:
@@ -105,10 +111,15 @@ class OrderSerializer(serializers.ModelSerializer):
             'created_at',
             'items',
         ]
-        read_only_fields = ['order_id', 'total', 'item_count', 'status', 'created_at']
+        read_only_fields = ['order_id', 'status', 'created_at', 'total', 'item_count']
 
     def validate(self, data):
         items = data.get('items', [])
+        
+        # Ensure items list is not empty
+        if not items:
+            raise serializers.ValidationError({'items': 'At least one item is required.'})
+        
         total = sum((item.get('unit_price', 0) or 0) * (item.get('qty', 0) or 0) for item in items)
         cutting_fee = sum(50 for item in items if item.get('custom_size'))
         if data.get('fulfillment') == 'Delivery':
@@ -126,4 +137,3 @@ class OrderSerializer(serializers.ModelSerializer):
         for item_data in items_data:
             OrderItem.objects.create(order=order, **item_data)
         return order
-

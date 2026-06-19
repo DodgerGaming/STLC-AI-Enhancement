@@ -3,11 +3,18 @@ const API_PATH = (path) => `${API_BASE}/api${path}`
 
 export async function fetchJson(path, init = {}) {
   const url = API_PATH(path)
+  const headers = {
+    'Content-Type': 'application/json',
+    ...init.headers,
+  }
+
+  const userEmail = localStorage.getItem('userEmail')
+  if (userEmail) {
+    headers['X-User-Email'] = userEmail
+  }
+
   const options = {
-    headers: {
-      'Content-Type': 'application/json',
-      ...init.headers,
-    },
+    headers,
     ...init,
   }
 

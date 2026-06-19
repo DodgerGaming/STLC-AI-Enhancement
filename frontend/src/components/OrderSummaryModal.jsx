@@ -17,8 +17,9 @@ export default function OrderSummaryModal() {
     paymentMethod,
     itemsSubtotal,
     shipping,
-    total,
     cuttingFee,
+    vat,
+    total,
     isSummaryOpen,
     closeSummary,
     confirmSale,
@@ -164,10 +165,16 @@ export default function OrderSummaryModal() {
               <span>{formatPeso(itemsSubtotal)}</span>
             </div>
             {cuttingFee > 0 && (
-              <div className="flex justify-between text-on-surface-variant">
-                <span>Cutting Fee</span>
-                <span>{formatPeso(cuttingFee)}</span>
-              </div>
+              <>
+                <div className="flex justify-between text-on-surface-variant">
+                  <span>Cutting Fee</span>
+                  <span>{formatPeso(cuttingFee)}</span>
+                </div>
+                <div className="flex justify-between text-on-surface-variant">
+                  <span>VAT (12% on cutting fee)</span>
+                  <span>{formatPeso(vat)}</span>
+                </div>
+              </>
             )}
             {shipping > 0 && (
               <div className="flex justify-between text-on-surface-variant">

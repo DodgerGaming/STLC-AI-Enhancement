@@ -1,9 +1,10 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / '.env')
+load_dotenv(BASE_DIR / '.env', override=True)
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-secret-key')
 
@@ -21,6 +22,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'api',
+    'api.authentication',
 ]
 
 MIDDLEWARE = [
@@ -57,14 +59,31 @@ WSGI_APPLICATION = 'django_framework.wsgi.application'
 DATABASE_ENGINE = os.environ.get('DATABASE_ENGINE', 'sqlite').lower()
 
 if DATABASE_ENGINE == 'postgresql':
+    # Read Postgres credentials from environment (.env). Do not fall back to hardcoded defaults.
+    DB_NAME = os.environ.get('DATABASE_NAME')
+    DB_USER = os.environ.get('DATABASE_USER')
+    DB_PASSWORD = os.environ.get('DATABASE_PASSWORD')
+    DB_HOST = os.environ.get('DATABASE_HOST')
+    DB_PORT = os.environ.get('DATABASE_PORT')
+
+    missing = [k for k, v in (
+        ('DATABASE_NAME', DB_NAME),
+        ('DATABASE_USER', DB_USER),
+        ('DATABASE_PASSWORD', DB_PASSWORD),
+        ('DATABASE_HOST', DB_HOST),
+        ('DATABASE_PORT', DB_PORT),
+    ) if not v]
+    if missing:
+        raise ImproperlyConfigured(f"PostgreSQL selected but missing env vars: {', '.join(missing)}")
+
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.environ.get('DATABASE_NAME', 'cutwise_db'),
-            'USER': os.environ.get('DATABASE_USER', 'cutwise_user'),
-            'PASSWORD': os.environ.get('DATABASE_PASSWORD', ''),
-            'HOST': os.environ.get('DATABASE_HOST', '127.0.0.1'),
-            'PORT': os.environ.get('DATABASE_PORT', '5432'),
+            'NAME': DB_NAME,
+            'USER': DB_USER,
+            'PASSWORD': DB_PASSWORD,
+            'HOST': DB_HOST,
+            'PORT': DB_PORT,
         }
     }
 else:
@@ -87,6 +106,9 @@ STATIC_URL = '/static/'
 # CORS - allow local React dev server
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
+    'http://localhost:5175',
+    'http://127.0.0.1:5175',
+    'http://localhost:5176',
 ]
 
 # Simple REST framework defaults

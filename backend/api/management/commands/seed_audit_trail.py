@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from api.models import Material, AuditTrail
-from api.services.audit_log import log_audit
+from api.audit import log_audit
 
 
 class Command(BaseCommand):
@@ -29,8 +29,7 @@ class Command(BaseCommand):
                 'total_stock': 420.7,
                 'batch_count': 3,
                 'tag': 'Best Seller',
-                'tint': '#8B4A2E',
-            },
+                            },
             user='Admin',
             description='Material added to inventory'
         )
@@ -69,7 +68,6 @@ class Command(BaseCommand):
                 'sale_price': 285,
                 'unit_price': 178,
                 'company': 'Tannería del Sol',
-                'quality_grade': 'Grade A',
             },
             user='Admin',
             description='New batch created'
@@ -88,7 +86,6 @@ class Command(BaseCommand):
                 'sale_price': 315,
                 'unit_price': 205,
                 'company': 'Cebu Hide Co.',
-                'quality_grade': 'Grade A',
             },
             user='Admin',
             description='Damaged batch removed from inventory'

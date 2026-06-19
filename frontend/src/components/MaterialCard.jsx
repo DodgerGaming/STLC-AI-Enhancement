@@ -64,6 +64,7 @@ export default function MaterialCard({ material }) {
   const [batches, setBatches] = useState([])
   const [loadingBatches, setLoadingBatches] = useState(false)
   const availableBatches = batches.filter((b) => b.status === 'Available')
+  const tint = material?.tint || '#7A3B23'
 
   const getFulfillmentError = () => {
     if (!fulfillment) return 'Choose Delivery or Pick-up for this order.'
@@ -73,6 +74,15 @@ export default function MaterialCard({ material }) {
     if (!isTimeInRange(scheduledTime)) return 'Time must be between 10:00 AM and 5:00 PM.'
     if (!paymentMethod) return 'Select a payment method.'
     return ''
+  }
+
+  const isValidName = (value) => {
+    const v = (value || '').trim()
+    return /^[A-Za-z\s]{2,}$/.test(v)
+  }
+
+  const isNumeric = (value) => {
+    return /^\d+(?:\.\d+)?$/.test((value || '').toString())
   }
 
   const openQuickAdd = async (e) => {
@@ -115,6 +125,15 @@ export default function MaterialCard({ material }) {
       setBatchError('Select a hide / batch before buying.')
       return
     }
+    if (qty < 1) {
+      setBatchError('Enter a valid quantity.')
+      return
+    }
+    if (qty > selectedBatch.quantity) {
+      setBatchError(`Only ${selectedBatch.quantity} unit${selectedBatch.quantity === 1 ? '' : 's'} available in this batch.`)
+      return
+    }
+
     setBatchError('')
     if (!cutOption) {
       setCutError('Please select a cutting option')
@@ -124,7 +143,16 @@ export default function MaterialCard({ material }) {
       setCutError('Please enter the requested width and height')
       return
     }
+    if (cutOption === 'Cut leather' && (!isNumeric(customWidth.trim()) || !isNumeric(customHeight.trim()))) {
+      setCutError('Width and height must be numbers')
+      return
+    }
     setCutError('')
+
+    if (!isValidName(localCustomer)) {
+      setBatchError('Enter a valid customer name (letters only, min 2 characters)')
+      return
+    }
 
     const fulfillmentMsg = getFulfillmentError()
     if (fulfillmentMsg) {
@@ -144,7 +172,7 @@ export default function MaterialCard({ material }) {
       unit: material.unit,
       unitPrice: material.sale_price,
       qty,
-      color: material.tint,
+      color: tint,
       customSize: cutOption === 'Cut leather' ? `${customWidth.trim()} x ${customHeight.trim()}` : '',
     })
     setAdded(true)
@@ -171,7 +199,7 @@ export default function MaterialCard({ material }) {
           />
           <div
             className="absolute inset-0 mix-blend-multiply"
-            style={{ backgroundColor: material.tint, opacity: 0.55 }}
+            style={{ backgroundColor: tint, opacity: 0.55 }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/15 via-transparent to-transparent" />
 
@@ -205,15 +233,11 @@ export default function MaterialCard({ material }) {
             <span className="text-xs font-medium text-on-surface-variant">/ {material.unit}</span>
           </p>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-outline-variant pt-3 text-xs">
-            <div>
-              <p className="text-on-surface-variant">SKU</p>
-              <p className="font-semibold text-on-surface">{material.sku}</p>
-            </div>
+          <div className="mt-3 grid grid-cols-1 gap-2 border-t border-outline-variant pt-3 text-xs">
             <div>
               <p className="text-on-surface-variant">In Stock</p>
               <p className="font-semibold text-on-surface">
-                {formatNumber(material.totalStock, material.unit === SCRAP_UNIT ? 1 : 0)} {material.unit}
+                {formatNumber(Number(material.totalStock ?? material.totalstock ?? material.total_stock ?? 0), material.unit === SCRAP_UNIT ? 1 : 0)} {material.unit}
               </p>
             </div>
           </div>
@@ -233,7 +257,7 @@ export default function MaterialCard({ material }) {
             {/* Header */}
             <div className="flex items-center justify-between border-b border-outline-variant px-5 py-4">
               <div className="flex items-center gap-3">
-                <span className="h-9 w-9 shrink-0 rounded-full shadow-sm" style={{ backgroundColor: material.tint }} />
+                <span className="h-9 w-9 shrink-0 rounded-full shadow-sm" style={{ backgroundColor: tint }} />
                 <div>
                   <p className="text-sm font-extrabold text-on-surface">{material.material_name}</p>
                   <p className="text-xs text-on-surface-variant">{formatPeso(material.sale_price)} / {material.unit}</p>
@@ -453,6 +477,13 @@ export default function MaterialCard({ material }) {
             </div>
 
             <div className="space-y-4 px-5 py-4">
+              <div>
+                <label className="text-sm font-semibold text-on-surface-variant">Description</label>
+                <div className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface-variant/40 px-3 py-2.5 text-sm text-on-surface">
+                  {material.description || 'No description available.'}
+                </div>
+              </div>
+
               {fulfillment === 'Delivery' && (
                 <div>
                   <label className="text-xs font-semibold text-on-surface-variant">Delivery Address</label>
@@ -472,7 +503,7 @@ export default function MaterialCard({ material }) {
               <div>
                 <label className="text-xs font-semibold text-on-surface-variant">Payment Method</label>
                 <div className="mt-1.5 flex flex-wrap gap-2">
-                  {['Over the Counter', 'Online Payment', 'COD'].map((method) => (
+                  {['Over the Counter', 'Online Payment', ...(fulfillment === 'Delivery' ? ['COD'] : [])].map((method) => (
                     <button
                       key={method}
                       type="button"

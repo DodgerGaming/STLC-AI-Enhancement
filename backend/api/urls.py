@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from django.urls import include
 
 urlpatterns = [
     path('ping/', views.ping, name='ping'),
@@ -7,7 +8,8 @@ urlpatterns = [
     path('materials/<str:material_id>/', views.material_detail, name='material-detail'),
     path('materials/<str:material_id>/batches/', views.material_batches, name='material-batches'),
     path('batches/', views.create_batch, name='create-batch'),
-    path('orders/', views.create_order, name='create-order'),
-    path('orders/list/', views.order_list, name='order-list'),
+    path('batches/<str:batch_code>/', views.batch_detail, name='batch-detail'),
+    path('orders/', views.orders, name='orders'),
     path('audit-trail/', views.audit_trail_list, name='audit-trail-list'),
+    path('authentication/', include('api.authentication.urls')),
 ]

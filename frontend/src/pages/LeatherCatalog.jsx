@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import MaterialCard from '../components/MaterialCard.jsx'
-import { fetchMaterials } from '../data/apiLeather.js'
+import { fetchMaterials, fetchMaterialsFiltered } from '../data/apiLeather.js'
 import { formatPeso } from '../utils/format.js'
 
 const TABS = [
@@ -19,27 +19,39 @@ export default function LeatherCatalog() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    // initial load
     setLoading(true)
     fetchMaterials()
       .then((data) => {
         setMaterials(data)
         setError('')
       })
-      .catch((err) => {
-        setError(err.message || 'Failed to load materials')
-      })
+      .catch((err) => setError(err.message || 'Failed to load materials'))
       .finally(() => setLoading(false))
   }, [])
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return materials.filter((m) => {
-      const matchesTab = activeTab === 'All' || m.leather_type === activeTab
-      const matchesQuery =
-        !q || m.material_name.toLowerCase().includes(q) || m.sku.toLowerCase().includes(q)
-      return matchesTab && matchesQuery
-    })
-  }, [materials, query, activeTab])
+  // server-side search: query the API when query or activeTab changes (debounced)
+  useEffect(() => {
+    const term = query.trim()
+    const timeout = setTimeout(() => {
+      setLoading(true)
+      fetchMaterialsFiltered({ q: term || undefined, type: activeTab })
+        .then((data) => {
+          setMaterials(data)
+          setError('')
+        })
+        .catch((err) => setError(err.message || 'Failed to load materials'))
+        .finally(() => setLoading(false))
+    }, 300)
+
+    return () => clearTimeout(timeout)
+  }, [query, activeTab])
+
+  const filtered = useMemo(() => materials || [], [materials])
+
+  const noResultsText = query.trim()
+    ? `No materials match "${query}".`
+    : 'No materials found.'
 
   return (
     <div className="pb-28">
@@ -59,7 +71,7 @@ export default function LeatherCatalog() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search leather type, material name, or Batch code..."
+          placeholder="Search material name or batch code..."
           className="w-full rounded-xl border border-outline-variant bg-surface py-3 pl-11 pr-4 text-sm text-on-surface placeholder:text-on-surface-variant focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
         />
       </div>
@@ -96,7 +108,7 @@ export default function LeatherCatalog() {
             ))}
             {filtered.length === 0 && (
               <p className="col-span-full py-12 text-center text-sm text-on-surface-variant">
-                No materials match “{query}”.
+                {noResultsText}
               </p>
             )}
           </div>

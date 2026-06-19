@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Plus, ImagePlus, Save, BadgeCheck, ChevronRight, ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import StatusPill from '../components/StatusPill.jsx'
-import { hideBatches, LEATHER_TYPES, unitForType } from '../data/mockLeather.js'
-import { createBatch } from '../data/apiLeather.js'
+import { LEATHER_TYPES, unitForType } from '../data/mockLeather.js'
+import { createBatch, fetchBatches, updateBatch, deleteBatch } from '../data/apiLeather.js'
 import { formatPeso, formatNumber } from '../utils/format.js'
 
 const STATUS_OPTIONS = ['Available']
@@ -13,57 +13,24 @@ const inputClass =
 
 const labelClass = 'text-sm font-semibold text-on-surface-variant'
 
-function agoToHours(ago) {
-  const match = /^(\d+)\s*(mo|h|d|w)/.exec(ago ?? '')
-  if (!match) return Infinity
-  const value = Number(match[1])
-  const multiplier = { h: 1, d: 24, w: 24 * 7, mo: 24 * 30 }[match[2]]
-  return value * multiplier
-}
+const TAG_OPTIONS = ['None', 'Best Seller', 'New Arrival', 'Low Stock', 'Sale']
 
-const STORAGE_KEY = 'manageLeatherHistory'
-
-function mapBatchToHistory(batch) {
+// Maps a raw batch record from the backend into the row shape used in this page.
+function mapBatchToRow(batch) {
   return {
     batch_code: batch.batch_code,
     material_name: batch.material_name,
     leather_type: batch.leather_type,
+    tag: batch.tag || '',
     size_sqft: batch.size_sqft,
     quantity: batch.quantity,
     salePrice: batch.sale_price,
     unitPrice: batch.unit_price,
     source: batch.company,
     status: batch.status,
-    added: batch.added,
-    addedAt: batch.addedAt ?? Date.now() - agoToHours(batch.added) * 60 * 60 * 1000,
+    added: new Date(batch.added_at).toLocaleString(),
+    addedAt: new Date(batch.added_at).getTime(),
   }
-}
-
-function buildSampleHistory() {
-  return [...hideBatches]
-    .map(mapBatchToHistory)
-    .sort((a, b) => b.addedAt - a.addedAt)
-}
-
-function loadHistory() {
-  if (typeof window === 'undefined') return buildSampleHistory()
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return buildSampleHistory()
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed) || parsed.length === 0) return buildSampleHistory()
-    return parsed.map((item) => ({
-      ...item,
-      addedAt: item.addedAt ?? Date.now(),
-    }))
-  } catch {
-    return buildSampleHistory()
-  }
-}
-
-function recentFromHistory(historyItems) {
-  return [...historyItems].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)).slice(0, 5)
 }
 
 export default function ManageLeather() {
@@ -76,6 +43,7 @@ export default function ManageLeather() {
   const [quantity, setQuantity] = useState('')
   const [salePrice, setSalePrice] = useState('')
   const [status, setStatus] = useState('Available')
+  const [tag, setTag] = useState('')
 
   const [sizeSqft, setSizeSqft] = useState('')
   const [unitPrice, setUnitPrice] = useState('')
@@ -83,7 +51,9 @@ export default function ManageLeather() {
   const [previewUrl, setPreviewUrl] = useState(null)
 
   const navigate = useNavigate()
-  const [recentlyAdded, setRecentlyAdded] = useState(() => recentFromHistory(loadHistory()))
+  const [recentlyAdded, setRecentlyAdded] = useState([])
+  const [recentLoading, setRecentLoading] = useState(true)
+  const [recentError, setRecentError] = useState('')
   const [justSaved, setJustSaved] = useState(false)
   const [errors, setErrors] = useState({})
   const [editingEntry, setEditingEntry] = useState(null)
@@ -118,11 +88,29 @@ export default function ManageLeather() {
     return newErrors
   }
 
+  // Always pulls the latest batches straight from the backend — single source of truth,
+  // shared by Leather Catalog, Manage Leather, and Full Leather History.
+  const refreshRecentlyAdded = () => {
+    setRecentLoading(true)
+    return fetchBatches({ limit: 100 })
+      .then((data) => {
+        if (!Array.isArray(data)) return
+        const mapped = data.map(mapBatchToRow).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
+        setRecentlyAdded(mapped.slice(0, 5))
+        setRecentError('')
+      })
+      .catch((err) => {
+        setRecentError(err.message || 'Failed to load recent batches')
+      })
+      .finally(() => setRecentLoading(false))
+  }
+
   const openEditModal = (item) => {
     setEditingEntry(item)
     setEditData({
       material_name: item.material_name,
       leather_type: item.leather_type,
+      tag: item.tag || '',
       description: item.description || '',
       size_sqft: item.size_sqft,
       quantity: item.quantity,
@@ -140,40 +128,39 @@ export default function ManageLeather() {
 
   const saveEdit = () => {
     if (!editingEntry) return
-    const updated = recentlyAdded.map((item) =>
-      item.batch_code === editingEntry.batch_code ? { ...item, ...editData } : item,
-    )
-    setRecentlyAdded(updated)
 
-    const history = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') || []
-    const updatedHistory = history.map((item) =>
-      item.batch_code === editingEntry.batch_code ? { ...item, ...editData } : item,
-    )
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory))
-    setRecentlyAdded(recentFromHistory(updatedHistory))
-
-    const auditEntry = {
-      id: Date.now(),
-      timestamp: new Date().toLocaleString(),
-      user: window.localStorage.getItem('userEmail')?.split('@')[0] || 'Clerk',
-      action: `Updated batch ${editingEntry.batch_code}`,
-      batch_code: editingEntry.batch_code,
+    const payload = {
+      material_name: editData.material_name,
+      leather_type: editData.leather_type,
+      tag: editData.tag,
+      size_sqft: Number(editData.size_sqft) || 0,
+      quantity: Number(editData.quantity) || 0,
+      sale_price: Number(editData.salePrice) || 0,
+      unit_price: Number(editData.unitPrice) || 0,
+      company: editData.source,
       status: editData.status,
     }
-    const existingAudit = JSON.parse(window.localStorage.getItem('auditTrailEntries') || '[]') || []
-    window.localStorage.setItem('auditTrailEntries', JSON.stringify([auditEntry, ...existingAudit]))
+
+    updateBatch(editingEntry.batch_code, payload)
+      .then(() => refreshRecentlyAdded())
+      .catch((err) => console.error('Failed to update batch', err))
 
     closeEditModal()
   }
 
   const deleteEntry = (batchCode) => {
-    const updated = recentlyAdded.filter((item) => item.batch_code !== batchCode)
-    setRecentlyAdded(updated)
-
-    const history = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') || []
-    const nextHistory = history.filter((item) => item.batch_code !== batchCode)
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextHistory))
-    setRecentlyAdded(recentFromHistory(nextHistory))
+    // Optimistically remove from UI
+    setRecentlyAdded((prev) => prev.filter((item) => item.batch_code !== batchCode))
+    deleteBatch(batchCode)
+      .then(() => {
+        // Refresh to ensure sync with backend
+        refreshRecentlyAdded()
+      })
+      .catch((err) => {
+        console.error('Failed to delete batch', err)
+        // Refresh on error too to restore the list
+        refreshRecentlyAdded()
+      })
   }
 
   const resetForm = () => {
@@ -184,11 +171,17 @@ export default function ManageLeather() {
     setQuantity('')
     setSalePrice('')
     setStatus('Available')
+    setTag('')
     setSizeSqft('')
     setUnitPrice('')
     setSource('')
     setPreviewUrl(null)
   }
+
+  // Load recent batches from backend on mount
+  useEffect(() => {
+    refreshRecentlyAdded()
+  }, [])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -201,26 +194,12 @@ export default function ManageLeather() {
 
     setErrors({})
 
-    const newEntry = {
-      batch_code: batchCode.trim(),
-      material_name: materialName.trim(),
-      leather_type: leatherType,
-      description: description.trim(),
-      quantity: Number(quantity) || 0,
-      size_sqft: Number(sizeSqft) || 0,
-      unitPrice: Number(unitPrice) || 0,
-      salePrice: Number(salePrice) || 0,
-      source: source.trim(),
-      status,
-      added: 'Just now',
-    }
-
-    // Send to backend API
-    createBatch({
+    const payload = {
       batch_code: batchCode.trim(),
       material_name: materialName.trim(),
       leather_type: leatherType,
       sku: batchCode.trim(),
+      tag: tag.trim(),
       quantity: Number(quantity) || 0,
       size_sqft: Number(sizeSqft) || 0,
       unit_price: Number(unitPrice) || 0,
@@ -229,25 +208,11 @@ export default function ManageLeather() {
       status,
       description: description.trim(),
       unit: unitForType(leatherType),
-    }).catch((err) => console.error('Failed to create batch in backend', err))
-
-    const history = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') || []
-    const updatedHistory = [{ ...newEntry, addedAt: Date.now() }, ...history]
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory))
-    setRecentlyAdded(recentFromHistory(updatedHistory))
-
-    const auditEntry = {
-      id: Date.now(),
-      timestamp: new Date().toLocaleString(),
-      user: window.localStorage.getItem('userEmail')?.split('@')[0] || 'Clerk',
-      action: `Created batch ${newEntry.batch_code}`,
-      batch_code: newEntry.batch_code,
-      status: newEntry.status,
     }
-    window.localStorage.setItem(
-      'auditTrailEntries',
-      JSON.stringify([auditEntry, ...(JSON.parse(window.localStorage.getItem('auditTrailEntries') || '[]') || [])]),
-    )
+
+    createBatch(payload)
+      .then(() => refreshRecentlyAdded())
+      .catch((err) => console.error('Failed to create batch', err))
 
     setJustSaved(true)
     setTimeout(() => setJustSaved(false), 2500)
@@ -263,20 +228,14 @@ export default function ManageLeather() {
           </div>
           <div>
             <h1 className="text-2xl font-extrabold text-on-surface">Add New Leather Batch</h1>
-            <p className="mt-0.5 text-sm text-on-surface-variant">
-              Register incoming stock into the central inventory system.
-            </p>
+            <p className="mt-0.5 text-sm text-on-surface-variant">Register incoming stock into the central inventory system.</p>
           </div>
         </div>
       </div>
 
-      <form
-        onSubmit={handleSubmit}
-        className="mt-6 rounded-xl border border-outline-variant bg-surface p-6 shadow-card sm:p-8"
-      >
-        <div className="grid grid-cols-1 gap-x-10 gap-y-6 lg:grid-cols-2">
-          {/* LEFT COLUMN */}
-          <div className="space-y-5">
+      <form onSubmit={handleSubmit} className="mt-6 grid gap-4 sm:grid-cols-[1.6fr_1fr]">
+        {/* LEFT COLUMN */}
+        <div className="space-y-5">
             <div>
               <label className={labelClass}>Batch Code</label>
               <input
@@ -319,6 +278,21 @@ export default function ManageLeather() {
                 {LEATHER_TYPES.map((type) => (
                   <option key={type} value={type}>
                     {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>Tag</label>
+              <select
+                value={tag || 'None'}
+                onChange={(e) => setTag(e.target.value === 'None' ? '' : e.target.value)}
+                className={`mt-1.5 ${inputClass}`}
+              >
+                {TAG_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
                   </option>
                 ))}
               </select>
@@ -520,7 +494,6 @@ export default function ManageLeather() {
               {errors.source && <p className="mt-1 text-xs text-red-500">{errors.source}</p>}
             </div>
           </div>
-        </div>
 
         <div className="mt-7 flex flex-wrap items-center justify-end gap-4 border-t border-outline-variant pt-6">
           {justSaved && (
@@ -565,7 +538,19 @@ export default function ManageLeather() {
               </tr>
             </thead>
             <tbody>
-              {recentlyAdded.length === 0 ? (
+              {recentLoading ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-on-surface-variant">
+                    Loading recently added batches...
+                  </td>
+                </tr>
+              ) : recentError ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-red-500">
+                    {recentError}
+                  </td>
+                </tr>
+              ) : recentlyAdded.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-5 py-10 text-center text-sm text-on-surface-variant">
                     No recently added batches yet.
@@ -672,6 +657,21 @@ export default function ManageLeather() {
                   onChange={(e) => setEditData((prev) => ({ ...prev, description: e.target.value }))}
                   className="mt-2 min-h-24 w-full resize-none rounded-xl border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-on-surface-variant">Tag</label>
+                <select
+                  value={editData.tag || 'None'}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, tag: e.target.value === 'None' ? '' : e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  {TAG_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>

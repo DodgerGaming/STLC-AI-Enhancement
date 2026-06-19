@@ -18,15 +18,13 @@ class Command(BaseCommand):
                 material_id=material['material_id'],
                 material_name=material['material_name'],
                 leather_type=material['leather_type'],
-                sku=material['sku'],
                 sale_price=material['sale_price'],
                 unit_price=material['unit_price'],
                 unit=material['unit'],
                 total_stock=material['totalStock'],
                 batch_count=material['batchCount'],
                 tag=material.get('tag') or '',
-                tint=material.get('tint') or '',
-                swatches=material.get('swatches') or [],
+                # tint and swatches removed from model
                 description=material.get('description') or '',
             )
             material_map[material['material_name']] = material_obj
@@ -45,9 +43,8 @@ class Command(BaseCommand):
                 sale_price=batch['sale_price'],
                 unit_price=batch['unit_price'],
                 company=batch['company'],
-                status=batch['status'],
-                quality_grade=batch.get('quality_grade', ''),
-                added=batch.get('added', ''),
+                status=('Available' if str(batch.get('status','')).strip().lower() == 'available' else 'Out of stock'),
+                # quality_grade removed; added_at is auto-set by model
             )
 
         self.stdout.write(self.style.SUCCESS('Materials and batches seeded successfully.'))

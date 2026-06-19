@@ -3,16 +3,21 @@ import { LayoutDashboard, Store, Layers, ClipboardList, LogOut, X } from 'lucide
 import { useAuth } from '../context/AuthContext.jsx'
 import Logo from '../assets/Logo.png'
 
-const NAV_ITEMS = [
+const NAV_ITEMS_ADMIN = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/sales', label: 'Sales Entry', icon: Store },
   { to: '/manage-leather', label: 'Manage Leather', icon: Layers },
   { to: '/audit-trail', label: 'Audit Trail', icon: ClipboardList },
 ]
 
+const NAV_ITEMS_CLERK = [
+  { to: '/sales', label: 'Sales Entry', icon: Store },
+]
+
 export default function Sidebar({ isOpen, onClose }) {
   const { logout } = useAuth()
   const userEmail = localStorage.getItem('userEmail') || 'User'
+  const userRole = localStorage.getItem('userRole') || 'Clerk'
   const userInitials = userEmail
     .split('@')[0]
     .split('')
@@ -48,7 +53,7 @@ export default function Sidebar({ isOpen, onClose }) {
 
       <nav className="mt-2 flex-1 px-3">
         <ul className="space-y-1">
-          {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+          {(userRole === 'Admin' ? NAV_ITEMS_ADMIN : NAV_ITEMS_CLERK).map(({ to, label, icon: Icon, end }) => (
             <li key={to}>
               <NavLink
                 to={to}
@@ -78,7 +83,7 @@ export default function Sidebar({ isOpen, onClose }) {
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-on-surface">{userEmail.split('@')[0]}</p>
-            <p className="truncate text-xs text-on-surface-variant">Sales Clerk</p>
+            <p className="truncate text-xs text-on-surface-variant">{userRole}</p>
           </div>
           <button
             type="button"

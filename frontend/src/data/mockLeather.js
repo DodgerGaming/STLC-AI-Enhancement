@@ -18,7 +18,7 @@ export const slugify = (value) =>
 // Each row represents one physical hide / batch sitting in the warehouse.
 // Schema: { batch_code, material_name, leather_type, size_sqft, quantity,
 //           sale_price, unit_price, company, status }
-// (sku, dimensions, quality_grade, tint and tag are extra fields used to
+// (dimensions, quality_grade, tint and tag are extra fields used to
 // drive the UI — they extend the schema rather than replace it.)
 export const hideBatches = [
   // Full Grain Cow Nappa — best seller
@@ -63,18 +63,18 @@ export const hideBatches = [
 ]
 
 // Visual identity per material — a tint colour multiplied over the shared
-// leather texture placeholder, plus a short run of finish/colour swatches.
+// leather texture placeholder.
 const materialStyles = {
-  'Full Grain Cow Nappa': { tint: '#8B4A2E', tag: 'Best Seller', swatches: ['#8B4A2E', '#5B3220', '#C98A4B', '#2B1B14'], description: 'Premium full-grain cow nappa with a smooth finish suitable for footwear and accessories.' },
-  'Tan Pebble Grain': { tint: '#B9853F', tag: 'Sale', swatches: ['#B9853F', '#8B5A2B', '#D9B077', '#6B4423'], description: 'Durable pebble-grain tan leather ideal for bags and belts.' },
-  'Black Goat Suede': { tint: '#262223', tag: 'Low Stock', swatches: ['#262223', '#4A4142', '#1C0606'], description: 'Soft black goat suede for premium linings and delicate footwear components.' },
-  'Cognac Veg-Tan': { tint: '#A6531E', tag: 'Best Seller', swatches: ['#A6531E', '#7A3B14', '#D98F4E'], description: 'Veg-tanned cognac leather with classic pull-up effect.' },
-  'Mixed Scrap Leather': { tint: '#6B5A52', tag: null, swatches: ['#6B5A52', '#8B4A2E', '#262223', '#B9853F'], description: 'Assorted offcuts and scraps sold by weight.' },
-  'Deep Navy Pull-up': { tint: '#2C3A52', tag: null, swatches: ['#2C3A52', '#1C2538', '#46587A'], description: 'Durable pull-up finish with navy hue.' },
-  'Pebble Grain Nappa': { tint: '#7A3B23', tag: null, swatches: ['#7A3B23', '#5B3220', '#C98A4B', '#A6A6A6'], description: 'Pebble grain nappa perfect for structured goods.' },
-  'Italian Nappa': { tint: '#7C5A3A', tag: 'Best Seller', swatches: ['#7C5A3A', '#3F2A1B', '#C9A06B'], description: 'Imported Italian nappa with fine grain and high durability.' },
-  'Pebbled Calfskin': { tint: '#4A3528', tag: 'Best Seller', swatches: ['#4A3528', '#7A5A3E', '#2B1B14'], description: 'Smooth calfskin with light pebbling for refined goods.' },
-  'Charcoal Suede': { tint: '#3A3536', tag: null, swatches: ['#3A3536', '#5C5456', '#1E1B1A'], description: 'Charcoal suede for sophisticated linings and trims.' },
+  'Full Grain Cow Nappa': { tint: '#8B4A2E', tag: 'Best Seller', description: 'Premium full-grain cow nappa with a smooth finish suitable for footwear and accessories.' },
+  'Tan Pebble Grain': { tint: '#B9853F', tag: 'Sale', description: 'Durable pebble-grain tan leather ideal for bags and belts.' },
+  'Black Goat Suede': { tint: '#262223', tag: 'Low Stock', description: 'Soft black goat suede for premium linings and delicate footwear components.' },
+  'Cognac Veg-Tan': { tint: '#A6531E', tag: 'Best Seller', description: 'Veg-tanned cognac leather with classic pull-up effect.' },
+  'Mixed Scrap Leather': { tint: '#6B5A52', tag: null, description: 'Assorted offcuts and scraps sold by weight.' },
+  'Deep Navy Pull-up': { tint: '#2C3A52', tag: null, description: 'Durable pull-up finish with navy hue.' },
+  'Pebble Grain Nappa': { tint: '#7A3B23', tag: null, description: 'Pebble grain nappa perfect for structured goods.' },
+  'Italian Nappa': { tint: '#7C5A3A', tag: 'Best Seller', description: 'Imported Italian nappa with fine grain and high durability.' },
+  'Pebbled Calfskin': { tint: '#4A3528', tag: 'Best Seller', description: 'Smooth calfskin with light pebbling for refined goods.' },
+  'Charcoal Suede': { tint: '#3A3536', tag: null, description: 'Charcoal suede for sophisticated linings and trims.' },
 }
 
 const LOW_STOCK_SQFT = 30
@@ -97,7 +97,7 @@ function buildMaterials() {
       (sum, b) => (b.status === 'Depleted' ? sum : sum + b.size_sqft),
       0,
     )
-    const style = materialStyles[material_name] || { tint: '#7A3B23', tag: null, swatches: ['#7A3B23'] }
+    const style = materialStyles[material_name] || { tint: '#7A3B23', tag: null }
     const threshold = unit === SCRAP_UNIT ? LOW_STOCK_WEIGHT : LOW_STOCK_SQFT
     const isLowStock = totalStock < threshold
 
@@ -112,8 +112,7 @@ function buildMaterials() {
       totalStock,
       batchCount: batches.filter((b) => b.status !== 'Depleted').length,
       tag: isLowStock ? 'Low Stock' : style.tag,
-      tint: style.tint,
-      swatches: style.swatches,
+      // tint and swatches removed from data shape
       description: style.description || '',
     }
   })

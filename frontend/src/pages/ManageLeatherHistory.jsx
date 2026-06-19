@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Pencil, Trash2, Save } from 'lucide-react'
 import StatusPill from '../components/StatusPill.jsx'
-import { hideBatches, LEATHER_TYPES, unitForType } from '../data/mockLeather.js'
+import { LEATHER_TYPES, unitForType } from '../data/mockLeather.js'
+import { fetchBatches, updateBatch, deleteBatch } from '../data/apiLeather.js'
 import { formatNumber } from '../utils/format.js'
 
-const STORAGE_KEY = 'manageLeatherHistory'
 const STATUS_OPTIONS = ['All', 'Available', 'Out of Stock']
 
 const inputClass =
@@ -13,63 +13,54 @@ const inputClass =
 
 const labelClass = 'text-sm font-semibold text-on-surface-variant'
 
-function agoToHours(ago) {
-  const match = /^([0-9]+)\s*(mo|w|d|h)/.exec(ago ?? '')
-  if (!match) return Infinity
-  const value = Number(match[1])
-  const multiplier = { h: 1, d: 24, w: 24 * 7, mo: 24 * 30 }[match[2]]
-  return value * multiplier
-}
-
-function mapBatchToHistory(batch) {
+// Maps a raw batch record from the backend into the row shape used in this page.
+function mapBatchToRow(batch) {
   return {
     batch_code: batch.batch_code,
     material_name: batch.material_name,
     leather_type: batch.leather_type,
+    tag: batch.tag || '',
     size_sqft: batch.size_sqft,
     quantity: batch.quantity,
     salePrice: batch.sale_price,
     unitPrice: batch.unit_price,
     source: batch.company,
     status: batch.status,
-    added: batch.added,
-  }
-}
-
-function buildSampleHistory() {
-  return [...hideBatches]
-    .sort((a, b) => agoToHours(a.added) - agoToHours(b.added))
-    .slice(0, 8)
-    .map(mapBatchToHistory)
-}
-
-function loadHistory() {
-  if (typeof window === 'undefined') return buildSampleHistory()
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return buildSampleHistory()
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed) || parsed.length === 0) return buildSampleHistory()
-    return parsed
-      .map((item) => ({ ...item, addedAt: item.addedAt ?? Date.now() }))
-      .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
-  } catch {
-    return buildSampleHistory()
+    added: new Date(batch.added_at).toLocaleString(),
+    addedAt: new Date(batch.added_at).getTime(),
   }
 }
 
 export default function ManageLeatherHistory() {
   const navigate = useNavigate()
-  const [historyItems, setHistoryItems] = useState(() => loadHistory())
+  const [historyItems, setHistoryItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [typeFilter, setTypeFilter] = useState('All')
   const [editingItem, setEditingItem] = useState(null)
   const [editData, setEditData] = useState({})
 
+  // Always pulls the latest batches straight from the backend — single source of truth,
+  // shared by Leather Catalog, Manage Leather, and Full Leather History.
+  const refreshHistory = () => {
+    setLoading(true)
+    return fetchBatches({ limit: 100 })
+      .then((data) => {
+        if (!Array.isArray(data)) return
+        const mapped = data.map(mapBatchToRow).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
+        setHistoryItems(mapped)
+        setError('')
+      })
+      .catch((err) => {
+        setError(err.message || 'Failed to load inventory history')
+      })
+      .finally(() => setLoading(false))
+  }
+
   useEffect(() => {
-    setHistoryItems(loadHistory())
+    refreshHistory()
   }, [])
 
   const visibleItems = historyItems.filter((item) => {
@@ -87,10 +78,6 @@ export default function ManageLeatherHistory() {
     return matchesSearch && matchesStatus && matchesType
   })
 
-  const updateLocalStorage = (items) => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
-  }
-
   const openEditModal = (item) => {
     setEditingItem(item)
     setEditData({ ...item })
@@ -103,18 +90,31 @@ export default function ManageLeatherHistory() {
 
   const saveEdit = () => {
     if (!editingItem) return
-    const updatedItems = historyItems.map((item) =>
-      item.batch_code === editingItem.batch_code ? { ...item, ...editData } : item,
-    )
-    setHistoryItems(updatedItems)
-    updateLocalStorage(updatedItems)
+
+    const payload = {
+      material_name: editData.material_name,
+      leather_type: editData.leather_type,
+      tag: editData.tag,
+      description: editData.description,
+      size_sqft: Number(editData.size_sqft) || 0,
+      quantity: Number(editData.quantity) || 0,
+      sale_price: Number(editData.salePrice) || 0,
+      unit_price: Number(editData.unitPrice) || 0,
+      company: editData.source,
+      status: editData.status,
+    }
+
+    updateBatch(editingItem.batch_code, payload)
+      .then(() => refreshHistory())
+      .catch((err) => console.error('Failed to update batch', err))
+
     closeEditModal()
   }
 
   const deleteHistoryItem = (batchCode) => {
-    const updatedItems = historyItems.filter((item) => item.batch_code !== batchCode)
-    setHistoryItems(updatedItems)
-    updateLocalStorage(updatedItems)
+    deleteBatch(batchCode)
+      .catch((err) => console.error('Failed to delete batch', err))
+      .finally(() => refreshHistory())
   }
 
   return (
@@ -186,7 +186,7 @@ export default function ManageLeatherHistory() {
             <h3 className="text-sm font-bold text-on-surface">Inventory History</h3>
             <p className="text-xs text-on-surface-variant">
               {historyItems.length === 0
-                ? 'No saved history yet. Sample batches are shown for preview.'
+                ? 'No inventory batches found in the database.'
                 : 'Showing the latest inventory batches in history.'}
             </p>
           </div>
@@ -209,7 +209,19 @@ export default function ManageLeatherHistory() {
               </tr>
             </thead>
             <tbody>
-              {visibleItems.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-on-surface-variant">
+                    Loading inventory history...
+                  </td>
+                </tr>
+              ) : error ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-red-500">
+                    {error}
+                  </td>
+                </tr>
+              ) : visibleItems.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-5 py-10 text-center text-sm text-on-surface-variant">
                     No matching inventory batches found.

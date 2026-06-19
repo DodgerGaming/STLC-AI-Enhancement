@@ -1,23 +1,65 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Wallet, Layers, ShoppingCart, AlertTriangle } from 'lucide-react'
 import KpiCard from '../components/KpiCard.jsx'
 import StatusPill from '../components/StatusPill.jsx'
 import SalesByTypeBarChart from '../components/SalesByTypeBarChart.jsx'
 import RevenueShareDonutChart from '../components/RevenueShareDonutChart.jsx'
-import { dashboardKpis, salesByTypeData, revenueShareData, recentSales, SCRAP_UNIT } from '../data/mockLeather.js'
+import { dashboardKpis, salesByTypeData, revenueShareData, SCRAP_UNIT } from '../data/mockLeather.js'
+import { fetchOrders } from '../data/apiLeather.js'
 import { formatPeso, formatNumber } from '../utils/format.js'
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('Delivery')
-  const [sales, setSales] = useState(recentSales)
+  const [sales, setSales] = useState([])
   const [editingSale, setEditingSale] = useState(null)
   const RECENT_LIMIT = 5
 
-  const normalizeFulfillment = (value) => (value || '').toLowerCase().replace(/-/g, '')
+  const normalizeFulfillment = (value) => {
+    const v = (value || '').toLowerCase().trim()
+    if (v.includes('pick')) return 'pickup'
+    if (v.includes('deliv')) return 'delivery'
+    return v
+  }
 
-  const visibleSales = sales
-    .filter((sale) => normalizeFulfillment(sale.fulfillment) === normalizeFulfillment(activeTab))
-    .slice(0, RECENT_LIMIT)
+  const filterBuyFulfillment = (sale) => {
+    const normalized = normalizeFulfillment(sale.fulfillment)
+    const tabNormalized = normalizeFulfillment(activeTab)
+    return normalized === tabNormalized
+  }
+
+  const visibleSales = sales.filter(filterBuyFulfillment).slice(0, RECENT_LIMIT)
+
+  // Load orders from backend on mount
+  useEffect(() => {
+    let active = true
+    fetchOrders()
+      .then((data) => {
+        if (!active || !Array.isArray(data)) return
+        // Map backend order objects into the shape the table expects
+        const mapped = data.map((o) => ({
+          order_id: o.order_id,
+          customer: o.customer,
+          // pick first material or join multiple
+          material: (o.items && o.items.length > 0) ? o.items.map((it) => it.material_name).join(', ') : '—',
+          qty: o.item_count || (o.items && o.items.reduce((s, it) => s + (it.qty || 0), 0)) || 0,
+          total: o.total || 0,
+          address: o.delivery_address || o.address || '—',
+          description: o.order_description || '—',
+          paymentMethod: o.payment_method || '—',
+          status: o.status || 'Pending',
+          fulfillment: normalizeFulfillment(o.fulfillment) === 'pickup' ? 'Pick-up' : normalizeFulfillment(o.fulfillment) === 'delivery' ? 'Delivery' : (o.fulfillment || 'Delivery'),
+          scheduledDate: o.scheduled_date,
+          scheduledTime: o.scheduled_time,
+          createdAt: o.created_at,
+          raw: o,
+        }))
+        setSales(mapped)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
 
   const openEditModal = (sale) => setEditingSale({ ...sale })
   const closeEditModal = () => setEditingSale(null)
@@ -110,6 +152,10 @@ export default function Dashboard() {
         {/* Horizontal scroll wrapper: table keeps a min-width so columns keep their
             natural size (no squeezed/cut-off text). User scrolls sideways instead. */}
         <div className="overflow-x-auto">
+          {(() => {
+            const isPickup = normalizeFulfillment(activeTab) === 'pickup'
+            const tableColSpan = isPickup ? 10 : 12
+            return (
           <table className="w-full min-w-[1280px] table-auto text-left text-xs sm:text-sm">
             <thead>
               <tr className="bg-surface-variant/60 font-semibold text-on-surface-variant">
@@ -118,10 +164,13 @@ export default function Dashboard() {
                 <th className="whitespace-nowrap px-3 py-3 sm:px-5">Material</th>
                 <th className="whitespace-nowrap px-3 py-3 sm:px-5">Qty</th>
                 <th className="whitespace-nowrap px-3 py-3 sm:px-5">Total</th>
-                <th className="whitespace-nowrap px-3 py-3 sm:px-5">Created At</th>
-                <th className="whitespace-nowrap px-3 py-3 sm:px-5">Schedule</th>
-                <th className="whitespace-nowrap px-3 py-3 sm:px-5">Address</th>
-                <th className="px-3 py-3 sm:px-5">Description</th>
+                <th className="whitespace-nowrap px-3 py-3 sm:px-5">Fulfillment</th>
+                {normalizeFulfillment(activeTab) === 'delivery' && (
+                  <>
+                    <th className="whitespace-nowrap px-3 py-3 sm:px-5">Address</th>
+                    <th className="px-3 py-3 sm:px-5">Description</th>
+                  </>
+                )}
                 <th className="whitespace-nowrap px-3 py-3 sm:px-5">Payment</th>
                 <th className="whitespace-nowrap px-3 py-3 sm:px-5">Status</th>
                 <th className="whitespace-nowrap px-3 py-3 text-right sm:px-5">Actions</th>
@@ -137,18 +186,17 @@ export default function Dashboard() {
                   <td className="whitespace-nowrap px-3 py-3 font-semibold text-on-surface sm:px-5">
                     {formatPeso(sale.total)}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-on-surface-variant sm:px-5">{sale.createdAt || '—'}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-on-surface-variant sm:px-5">
-                    {sale.scheduledDate || sale.scheduledTime
-                      ? `${sale.scheduledDate || ''} ${sale.scheduledTime || ''}`.trim()
-                      : '—'}
-                  </td>
-                  <td className="max-w-[220px] truncate px-3 py-3 text-on-surface-variant sm:px-5" title={sale.address}>
-                    {sale.address || '—'}
-                  </td>
-                  <td className="max-w-[260px] truncate px-3 py-3 text-on-surface-variant sm:px-5" title={sale.description}>
-                    {sale.description || '—'}
-                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-on-surface-variant sm:px-5">{sale.fulfillment || '—'}</td>
+                  {normalizeFulfillment(activeTab) === 'delivery' && (
+                    <>
+                      <td className="max-w-[220px] truncate px-3 py-3 text-on-surface-variant sm:px-5" title={sale.address}>
+                        {sale.address || '—'}
+                      </td>
+                      <td className="max-w-[260px] truncate px-3 py-3 text-on-surface-variant sm:px-5" title={sale.description}>
+                        {sale.description || '—'}
+                      </td>
+                    </>
+                  )}
                   <td className="whitespace-nowrap px-3 py-3 text-on-surface-variant sm:px-5">
                     {sale.paymentMethod || '—'}
                   </td>
@@ -175,13 +223,18 @@ export default function Dashboard() {
               ))}
               {visibleSales.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-3 py-8 text-center text-xs text-on-surface-variant sm:px-5 sm:text-sm">
+                  <td colSpan={(() => {
+                    const isPickup = normalizeFulfillment(activeTab) === 'pickup'
+                    return isPickup ? 10 : 12
+                  })()} className="px-3 py-8 text-center text-xs text-on-surface-variant sm:px-5 sm:text-sm">
                     No {activeTab.toLowerCase()} transactions found.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+            )
+          })()}
         </div>
       </div>
 
@@ -248,13 +301,17 @@ export default function Dashboard() {
                 />
               </label>
               <label className="space-y-2 text-sm sm:col-span-2">
-                <span className="font-semibold text-on-surface-variant">Address</span>
-                <input
-                  type="text"
-                  value={editingSale.address || ''}
-                  onChange={(e) => handleEditChange('address', e.target.value)}
-                  className="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
+                {normalizeFulfillment(editingSale.fulfillment) === 'delivery' && (
+                  <>
+                    <span className="font-semibold text-on-surface-variant">Address</span>
+                    <input
+                      type="text"
+                      value={editingSale.address || ''}
+                      onChange={(e) => handleEditChange('address', e.target.value)}
+                      className="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </>
+                )}
               </label>
               <label className="space-y-2 text-sm sm:col-span-2">
                 <span className="font-semibold text-on-surface-variant">Description</span>
@@ -268,14 +325,19 @@ export default function Dashboard() {
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-on-surface-variant">Payment Method</span>
                 <select
-                  value={editingSale.paymentMethod || 'Cash'}
+                  value={editingSale.paymentMethod || 'Over the Counter'}
                   onChange={(e) => handleEditChange('paymentMethod', e.target.value)}
                   className="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
-                  <option value="Cash">Cash</option>
-                  <option value="Bank Transfer">Bank Transfer</option>
-                  <option value="Gcash">Gcash</option>
-                  <option value="Credit Card">Credit Card</option>
+                  <option value="Over the Counter">Over the Counter</option>
+                  <option value="Online Payment">Online Payment</option>
+                  {normalizeFulfillment(editingSale.fulfillment) === 'delivery' && (
+                    <option value="COD">COD</option>
+                  )}
+                  {/* Preserve any existing payment method value that's not in the list */}
+                  {editingSale.paymentMethod && !['Over the Counter', 'Online Payment', 'COD'].includes(editingSale.paymentMethod) && (
+                    <option value={editingSale.paymentMethod}>{editingSale.paymentMethod}</option>
+                  )}
                 </select>
               </label>
             </div>

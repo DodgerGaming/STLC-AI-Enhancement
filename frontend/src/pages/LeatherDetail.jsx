@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Minus, Plus, ShoppingCart, ArrowLeft } from 'lucide-react'
 import HideInventoryTable from '../components/HideInventoryTable.jsx'
@@ -17,7 +17,6 @@ export default function LeatherDetail() {
 
   const [selectedBatchCode, setSelectedBatchCode] = useState('')
   const [quantity, setQuantity] = useState(1)
-  const [swatchIndex, setSwatchIndex] = useState(0)
   const [detailsModalOpen, setDetailsModalOpen] = useState(false)
   const [validationMessage, setValidationMessage] = useState('')
   const [attemptedSubmit, setAttemptedSubmit] = useState(false)
@@ -72,7 +71,14 @@ export default function LeatherDetail() {
   } = useCart()
 
   const selectedBatch = batches.find((b) => b.batch_code === selectedBatchCode)
-  const hasStock = Boolean(firstAvailable)
+  // compute total stock: prefer material.totalStock from API, fallback to summing batches
+  const computedBatchStock = batches.reduce((sum, b) => sum + (Number(b.size_sqft || 0) * Number(b.quantity || 0)), 0)
+  const apiStockValue = material?.totalStock ?? material?.totalstock ?? material?.total_stock
+  const totalStock = apiStockValue != null ? Number(apiStockValue) : computedBatchStock
+  const hasStock = totalStock > 0
+  const tint = material?.tint || '#7A3B23'
+  // max purchasable quantity is capped by how many units of the selected batch are actually in stock
+  const maxQty = selectedBatch ? Math.max(1, Number(selectedBatch.quantity) || 0) : 99
 
   const getAutoDescription = () => {
     if (!selectedBatch || !material) return ''
@@ -87,6 +93,13 @@ export default function LeatherDetail() {
     const composed = (material?.description ? material.description + ' ' : '') + (getAutoDescription() || '')
     setOrderDescription(composed.trim())
   }, [material, selectedBatch, setOrderDescription])
+
+  // keep quantity within the stock actually available for the selected batch
+  useEffect(() => {
+    if (selectedBatch) {
+      setQuantity((q) => Math.min(Math.max(1, q), maxQty))
+    }
+  }, [selectedBatchCode])
 
   if (loadingData) {
     return (
@@ -143,7 +156,15 @@ export default function LeatherDetail() {
   const getOrderValidationMessage = () => {
     if (!hasStock) return 'Select an available batch before buying.'
     if (!selectedBatch) return 'Select a hide / batch before buying.'
-    if (!customerName.trim()) return 'Enter the customer name to continue.'
+    if (quantity > maxQty) return `Only ${maxQty} unit${maxQty !== 1 ? 's' : ''} available for batch ${selectedBatch.batch_code}.`
+    const isValidName = (value) => {
+      const v = (value || '').trim()
+      return /^[A-Za-z\s]{2,}$/.test(v)
+    }
+
+    const isNumeric = (value) => /^\d+(?:\.\d+)?$/.test((value || '').toString())
+
+    if (!customerName.trim() || !isValidName(customerName)) return 'Enter a valid customer name (letters only, min 2 characters).'
     if (!fulfillment) return 'Choose Delivery or Pick-up to proceed.'
     if (fulfillment === 'Delivery') {
       if (!deliveryAddress.trim()) {
@@ -165,6 +186,9 @@ export default function LeatherDetail() {
     if (cutOption === 'Cut leather') {
       if (!customWidth.trim() || !customHeight.trim()) {
         return 'Enter the requested width and height for cutting.'
+      }
+      if (!isNumeric(customWidth.trim()) || !isNumeric(customHeight.trim())) {
+        return 'Width and height must be numbers.'
       }
     }
     if (fulfillment === 'Pick-up') {
@@ -217,7 +241,7 @@ export default function LeatherDetail() {
     unit: material.unit,
     unitPrice: material.sale_price,
     qty: quantity,
-    color: material.tint,
+    color: tint,
     customSize: cutOption === 'Cut leather' ? `${customWidth.trim()} x ${customHeight.trim()}` : '',
   })
 
@@ -252,7 +276,7 @@ export default function LeatherDetail() {
       </button>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1.1fr_1fr]">
-        {/* LEFT — hero image + swatches */}
+        {/* LEFT — hero image */}
         <div>
           <div className="relative aspect-[4/3] overflow-hidden rounded-2xl">
             <img
@@ -262,7 +286,7 @@ export default function LeatherDetail() {
             />
             <div
               className="absolute inset-0 mix-blend-multiply"
-              style={{ backgroundColor: material.tint, opacity: 0.55 }}
+              style={{ backgroundColor: tint, opacity: 0.55 }}
             />
             <div className="absolute left-3 top-3 flex gap-2">
               <span
@@ -276,34 +300,18 @@ export default function LeatherDetail() {
               <span className="rounded-full bg-surface/90 px-3 py-1 text-xs font-bold text-on-surface shadow-sm">
                 {material.leather_type}
               </span>
+              <span className="rounded-full bg-surface/90 px-3 py-1 text-xs font-semibold text-on-surface shadow-sm">
+                {`${formatNumber(totalStock, 2)} ${material?.unit || 'sqft'}`}
+              </span>
             </div>
           </div>
 
-          <div className="mt-4 flex gap-3">
-            {material.swatches.map((color, i) => (
-              <button
-                key={color + i}
-                type="button"
-                onClick={() => setSwatchIndex(i)}
-                aria-label={`Select finish ${i + 1}`}
-                className={[
-                  'h-11 w-11 rounded-full border-2 transition-transform',
-                  swatchIndex === i
-                    ? 'border-primary scale-105'
-                    : 'border-transparent hover:scale-105',
-                ].join(' ')}
-                style={{ backgroundColor: color }}
-              />
-            ))}
-          </div>
         </div>
 
         {/* RIGHT — sale entry form */}
         <div>
           <h1 className="text-2xl font-extrabold text-on-surface">{material.material_name}</h1>
-          <p className="mt-1 text-sm text-on-surface-variant">
-            SKU: {material.sku} · {material.leather_type}
-          </p>
+          <p className="mt-1 text-sm text-on-surface-variant">{material.leather_type}</p>
           <p className="mt-2 text-xl font-bold text-primary">
             {formatPeso(material.sale_price)}{' '}
             <span className="text-sm font-medium text-on-surface-variant">/ {material.unit}</span>
@@ -336,7 +344,7 @@ export default function LeatherDetail() {
               </option>
               {batches.map((b) => (
                 <option key={b.batch_code} value={b.batch_code} disabled={b.status !== 'Available'}>
-                  Batch {b.batch_code} — {formatNumber(b.size_sqft, 2)} {material.unit} available
+                  Batch {b.batch_code} — {formatNumber(b.size_sqft, 2)} {material.unit}, {formatNumber(b.quantity, 0)} in stock
                   {b.status !== 'Available' ? ` (${b.status})` : ''}
                 </option>
               ))}
@@ -361,12 +369,18 @@ export default function LeatherDetail() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => setQuantity((q) => Math.min(99, q + 1))}
-                  className="flex h-10 w-10 items-center justify-center text-on-surface-variant hover:text-primary"
+                  onClick={() => setQuantity((q) => Math.min(maxQty, q + 1))}
+                  disabled={quantity >= maxQty}
+                  className="flex h-10 w-10 items-center justify-center text-on-surface-variant hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-on-surface-variant"
                 >
                   <Plus size={16} />
                 </button>
               </div>
+              {selectedBatch && (
+                <p className="mt-1 text-xs text-on-surface-variant">
+                  {maxQty} available for this batch
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-semibold text-on-surface-variant">
@@ -528,12 +542,12 @@ export default function LeatherDetail() {
                     </div>
                   )}
 
-                  <div>
+                    <div>
                     <label className="text-sm font-semibold text-on-surface-variant">
                       Payment Method
                     </label>
                     <div className="mt-1.5 flex flex-wrap gap-2">
-                      {['Over the Counter', 'Online Payment', 'COD'].map((method) => (
+                      {['Over the Counter', 'Online Payment', ...(fulfillment === 'Delivery' ? ['COD'] : [])].map((method) => (
                         <button
                           key={method}
                           type="button"

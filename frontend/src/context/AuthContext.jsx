@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
 const AuthContext = createContext()
 
 export function AuthProvider({ children }) {
@@ -10,6 +12,7 @@ export function AuthProvider({ children }) {
     // Check if user is logged in on mount
     const authToken = localStorage.getItem('authToken')
     const userEmail = localStorage.getItem('userEmail')
+    const userRole = localStorage.getItem('userRole')
     
     if (authToken && userEmail) {
       setIsAuthenticated(true)
@@ -19,12 +22,29 @@ export function AuthProvider({ children }) {
     setLoading(false)
   }, [])
 
-  const login = (email) => {
-    // Create a mock token (replace with real API token)
-    const mockToken = 'auth_token_' + Date.now()
-    localStorage.setItem('authToken', mockToken)
-    localStorage.setItem('userEmail', email)
+  const login = async (email, password) => {
+    // Call backend login API
+    const res = await fetch(`${API_BASE}/api/authentication/login/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Login failed')
+    }
+
+    const data = await res.json()
+    // backend returns { success: true, user: { ... } }
+    const user = data.user
+    const token = 'auth_token_' + Date.now()
+    localStorage.setItem('authToken', token)
+    localStorage.setItem('userEmail', user.email)
+    localStorage.setItem('userRole', user.role)
+    localStorage.setItem('userId', user.id)
     setIsAuthenticated(true)
+    return user
   }
 
   const logout = () => {

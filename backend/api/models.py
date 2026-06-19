@@ -5,15 +5,13 @@ class Material(models.Model):
     material_id = models.SlugField(primary_key=True, max_length=100)
     material_name = models.CharField(max_length=255)
     leather_type = models.CharField(max_length=80)
-    sku = models.CharField(max_length=100)
     sale_price = models.DecimalField(max_digits=10, decimal_places=2)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     unit = models.CharField(max_length=20)
     total_stock = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     batch_count = models.PositiveIntegerField(default=0)
     tag = models.CharField(max_length=50, blank=True)
-    tint = models.CharField(max_length=20, blank=True)
-    swatches = models.JSONField(default=list, blank=True)
+    # removed tint and swatches (handled in UI via design assets)
     description = models.TextField(blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -30,8 +28,8 @@ class Batch(models.Model):
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     company = models.CharField(max_length=255)
     status = models.CharField(max_length=50)
-    quality_grade = models.CharField(max_length=80, blank=True)
-    added = models.CharField(max_length=80, blank=True)
+    # quality_grade removed; use status to indicate availability
+    added_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f'{self.batch_code} ({self.material.material_name})'

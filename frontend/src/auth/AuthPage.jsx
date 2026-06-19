@@ -30,11 +30,19 @@ export default function AuthPage({ role = 'Sales Clerk', onBackToRoleSelect }) {
         return
       }
 
-      // Simulate API call delay
-      setTimeout(() => {
-        login(email)
-        navigate('/dashboard', { replace: true })
-      }, 800)
+      try {
+        const user = await login(email, password)
+        // redirect based on role
+        if (user.role === 'Admin') {
+          navigate('/dashboard', { replace: true })
+        } else {
+          navigate('/sales', { replace: true })
+        }
+      } catch (err) {
+        setError(err.message || 'Invalid credentials')
+        setLoading(false)
+        return
+      }
     } catch (err) {
       setError('Failed to fetch')
       setLoading(false)

@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 
 export default function ProtectedRoute({ children }) {
@@ -17,6 +17,16 @@ export default function ProtectedRoute({ children }) {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
+  }
+
+  // Role-based redirect: Clerks should not access admin pages like /dashboard, /manage-leather, /audit-trail
+  const userRole = localStorage.getItem('userRole') || 'Clerk'
+  const location = useLocation()
+  const path = location.pathname || '/'
+
+  const adminPaths = ['/dashboard', '/manage-leather', '/audit-trail']
+  if (userRole === 'Clerk' && adminPaths.some((p) => path.startsWith(p))) {
+    return <Navigate to="/sales" replace />
   }
 
   return children

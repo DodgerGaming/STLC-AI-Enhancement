@@ -70,8 +70,9 @@ export function CartProvider({ children }) {
     () => items.reduce((sum, it) => sum + (it.customSize ? 50 : 0), 0),
     [items],
   )
+  const vat = useMemo(() => Number((cuttingFee * 0.12).toFixed(2)), [cuttingFee])
   const shipping = useMemo(() => (fulfillment === 'Delivery' ? SHIPPING_FEE : 0), [fulfillment])
-  const total = useMemo(() => itemsSubtotal + shipping + cuttingFee, [itemsSubtotal, shipping, cuttingFee])
+  const total = useMemo(() => itemsSubtotal + shipping + cuttingFee + vat, [itemsSubtotal, shipping, cuttingFee, vat])
   const itemCount = useMemo(() => items.reduce((sum, it) => sum + it.qty, 0), [items])
 
   const confirmSale = useCallback(async () => {
@@ -130,6 +131,8 @@ export function CartProvider({ children }) {
     setPaymentMethod,
     itemsSubtotal,
     shipping,
+    cuttingFee,
+    vat,
     total,
     itemCount,
     isSummaryOpen,
