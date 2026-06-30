@@ -12,6 +12,7 @@ const NAV_ITEMS_ADMIN = [
 
 const NAV_ITEMS_CLERK = [
   { to: '/sales', label: 'Sales Entry', icon: Store },
+  { to: '/sales-transactions', label: 'Sales Transactions', icon: ClipboardList },
 ]
 
 export default function Sidebar({ isOpen, onClose }) {

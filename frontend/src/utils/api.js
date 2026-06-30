@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_URL ?? ''
 const API_PATH = (path) => `${API_BASE}/api${path}`
 
 export async function fetchJson(path, init = {}) {

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_URL ?? ''
+const API_PATH = (path) => `${API_BASE}/api${path}`
 
 const AuthContext = createContext()
 
@@ -24,7 +25,7 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     // Call backend login API
-    const res = await fetch(`${API_BASE}/api/authentication/login/`, {
+    const res = await fetch(API_PATH('/authentication/login/'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),

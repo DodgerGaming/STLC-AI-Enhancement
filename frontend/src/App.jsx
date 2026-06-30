@@ -9,6 +9,7 @@ import LeatherDetail from './pages/LeatherDetail.jsx'
 import ManageLeather from './pages/ManageLeather.jsx'
 import ManageLeatherHistory from './pages/ManageLeatherHistory.jsx'
 import AuditTrail from './pages/AuditTrail.jsx'
+import SalesTransactions from './pages/SalesTransactions.jsx'
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/manage-leather" element={<ManageLeather />} />
         <Route path="/manage-leather/history" element={<ManageLeatherHistory />} />
         <Route path="/audit-trail" element={<AuditTrail />} />
+        <Route path="/sales-transactions" element={<SalesTransactions />} />
       </Route>
     </Routes>
   )
