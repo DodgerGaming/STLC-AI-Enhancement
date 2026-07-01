@@ -48,12 +48,16 @@ class MaterialSerializer(serializers.ModelSerializer):
 
 
 class AuditTrailSerializer(serializers.ModelSerializer):
+    user = serializers.CharField(source='user_display_name', read_only=True)
+    role = serializers.CharField(read_only=True)
+
     class Meta:
         model = AuditTrail
         fields = [
             'id',
             'timestamp',
             'user',
+            'role',
             'entity_type',
             'entity_id',
             'entity_name',

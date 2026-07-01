@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, ImagePlus, Save, BadgeCheck, ChevronRight, ArrowLeft, Pencil, Trash2 } from 'lucide-react'
+import { ImagePlus, Save, BadgeCheck, ChevronRight, ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import StatusPill from '../components/StatusPill.jsx'
 import { LEATHER_TYPES, unitForType } from '../data/mockLeather.js'
@@ -58,6 +58,10 @@ export default function ManageLeather() {
   const [errors, setErrors] = useState({})
   const [editingEntry, setEditingEntry] = useState(null)
   const [editData, setEditData] = useState({})
+  const userRole = localStorage.getItem('userRole') || 'Clerk'
+  const isAdmin = userRole === 'Admin'
+  const isSupervisor = userRole === 'Supervisor'
+  const canCreateBatch = isSupervisor
 
   const unit = unitForType(leatherType)
   const editUnit = unitForType(editData.leather_type || editingEntry?.leather_type || LEATHER_TYPES[0])
@@ -127,7 +131,7 @@ export default function ManageLeather() {
   }
 
   const saveEdit = () => {
-    if (!editingEntry) return
+    if (!editingEntry || !isSupervisor) return
 
     const payload = {
       material_name: editData.material_name,
@@ -149,6 +153,12 @@ export default function ManageLeather() {
   }
 
   const deleteEntry = (batchCode) => {
+    if (!isAdmin) return
+    const confirmed = window.confirm(
+      `Delete batch ${batchCode}? This cannot be undone. Proceed only if you are sure.`
+    )
+    if (!confirmed) return
+
     // Optimistically remove from UI
     setRecentlyAdded((prev) => prev.filter((item) => item.batch_code !== batchCode))
     deleteBatch(batchCode)
@@ -185,6 +195,7 @@ export default function ManageLeather() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
+    if (!canCreateBatch) return
     const validationErrors = getValidationErrors()
     
     if (Object.keys(validationErrors).length > 0) {
@@ -211,7 +222,23 @@ export default function ManageLeather() {
     }
 
     createBatch(payload)
-      .then(() => refreshRecentlyAdded())
+      .then(() => {
+        const newRow = mapBatchToRow({
+          batch_code: payload.batch_code,
+          material_name: payload.material_name,
+          leather_type: payload.leather_type,
+          tag: payload.tag,
+          size_sqft: payload.size_sqft,
+          quantity: payload.quantity,
+          sale_price: payload.sale_price,
+          unit_price: payload.unit_price,
+          company: payload.company,
+          status: payload.status,
+          added_at: new Date().toISOString(),
+        })
+        setRecentlyAdded((prev) => [newRow, ...prev.filter((item) => item.batch_code !== newRow.batch_code)].slice(0, 5))
+        return refreshRecentlyAdded()
+      })
       .catch((err) => console.error('Failed to create batch', err))
 
     setJustSaved(true)
@@ -221,19 +248,12 @@ export default function ManageLeather() {
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-surface">
-            <Plus size={20} strokeWidth={2.5} />
-          </div>
-          <div>
-            <h1 className="text-2xl font-extrabold text-on-surface">Add New Leather Batch</h1>
-            <p className="mt-0.5 text-sm text-on-surface-variant">Register incoming stock into the central inventory system.</p>
-          </div>
+      {!canCreateBatch && (
+        <div className="mb-4 rounded-xl border border-outline-variant bg-surface p-4 text-sm text-on-surface-variant">
+          Only Supervisors can create new leather batches. Admins can view and delete, but not create.
         </div>
-      </div>
-
-      <form onSubmit={handleSubmit} className="mt-6 grid gap-4 sm:grid-cols-[1.6fr_1fr]">
+      )}
+      <form onSubmit={handleSubmit} className="mt-2 grid gap-4 sm:grid-cols-[1.6fr_1fr]">
         {/* LEFT COLUMN */}
         <div className="space-y-5">
             <div>
@@ -503,7 +523,8 @@ export default function ManageLeather() {
           )}
           <button
             type="submit"
-            className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-surface transition-colors hover:bg-primary-dark"
+            disabled={!canCreateBatch}
+            className={`flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-bold text-surface transition-colors ${canCreateBatch ? 'bg-primary hover:bg-primary-dark' : 'cursor-not-allowed bg-surface-variant text-on-surface-variant'}`}
           >
             <Save size={16} /> Save Leather Entry
           </button>
@@ -574,20 +595,24 @@ export default function ManageLeather() {
                     <td className="px-5 py-3 text-on-surface-variant">{row.added}</td>
                     <td className="px-5 py-3 text-right">
                       <div className="inline-flex items-center gap-2 justify-end">
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(row)}
-                          className="rounded-lg border border-outline-variant bg-surface px-3 py-1 text-xs font-semibold text-on-surface hover:border-primary hover:text-primary"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteEntry(row.batch_code)}
-                          className="rounded-lg border border-outline-variant bg-surface px-3 py-1 text-xs font-semibold text-on-surface hover:border-danger hover:text-danger"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        {isSupervisor && (
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(row)}
+                            className="rounded-lg border border-outline-variant bg-surface px-3 py-1 text-xs font-semibold text-on-surface hover:border-primary hover:text-primary"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => deleteEntry(row.batch_code)}
+                            className="rounded-lg border border-outline-variant bg-surface px-3 py-1 text-xs font-semibold text-on-surface hover:border-danger hover:text-danger"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

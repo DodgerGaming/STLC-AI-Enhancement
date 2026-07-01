@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search } from 'lucide-react'
 import MaterialCard from '../components/MaterialCard.jsx'
-import { fetchMaterials, fetchMaterialsFiltered } from '../data/apiLeather.js'
+import { fetchMaterialsFiltered } from '../data/apiLeather.js'
 import { formatPeso } from '../utils/format.js'
 
 const TABS = [
@@ -13,70 +12,35 @@ const TABS = [
 
 export default function LeatherCatalog() {
   const [materials, setMaterials] = useState([])
-  const [query, setQuery] = useState('')
   const [activeTab, setActiveTab] = useState('All')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    // initial load
     setLoading(true)
-    fetchMaterials()
+    const type = activeTab === 'All' ? undefined : activeTab
+    fetchMaterialsFiltered({ type })
       .then((data) => {
         setMaterials(data)
         setError('')
       })
       .catch((err) => setError(err.message || 'Failed to load materials'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [activeTab])
 
-  // server-side search: query the API when query or activeTab changes (debounced)
-  useEffect(() => {
-    const term = query.trim()
-    const timeout = setTimeout(() => {
-      setLoading(true)
-      fetchMaterialsFiltered({ q: term || undefined, type: activeTab })
-        .then((data) => {
-          setMaterials(data)
-          setError('')
-        })
-        .catch((err) => setError(err.message || 'Failed to load materials'))
-        .finally(() => setLoading(false))
-    }, 300)
+  const filtered = useMemo(
+    () =>
+      (materials || []).filter(
+        (material) => Number(material.totalStock ?? material.totalstock ?? material.total_stock ?? 0) > 0
+      ),
+    [materials]
+  )
 
-    return () => clearTimeout(timeout)
-  }, [query, activeTab])
-
-  const filtered = useMemo(() => materials || [], [materials])
-
-  const noResultsText = query.trim()
-    ? `No materials match "${query}".`
-    : 'No materials found.'
+  const noResultsText = 'No available materials found.'
 
   return (
     <div className="pb-28">
-      <div>
-        <h1 className="text-2xl font-extrabold text-on-surface">Leather Catalog</h1>
-        <p className="mt-1 text-sm text-on-surface-variant">
-          Browse and select materials for the current order.
-        </p>
-      </div>
-
-      <div className="relative mt-5">
-        <Search
-          size={18}
-          className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant"
-        />
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search material name or batch code..."
-          className="w-full rounded-xl border border-outline-variant bg-surface py-3 pl-11 pr-4 text-sm text-on-surface placeholder:text-on-surface-variant focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-        />
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-2 flex flex-wrap gap-2">
         {TABS.map((tab) => (
           <button
             key={tab.value}

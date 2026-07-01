@@ -56,3 +56,9 @@ export async function createOrder(orderPayload) {
     body: JSON.stringify(orderPayload),
   })
 }
+
+export async function deleteOrder(orderId) {
+  return fetchJson(`/orders/${orderId}/`, {
+    method: 'DELETE',
+  })
+}

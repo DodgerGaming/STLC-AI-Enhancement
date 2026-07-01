@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -76,7 +77,13 @@ class AuditTrail(models.Model):
     ]
 
     timestamp = models.DateTimeField(auto_now_add=True)
-    user = models.CharField(max_length=100, default='System')
+    user = models.ForeignKey(
+        'authentication.AuthUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='audit_entries',
+    )
     entity_type = models.CharField(max_length=50)
     entity_id = models.CharField(max_length=100)
     entity_name = models.CharField(max_length=255, blank=True, help_text='Material name, leather type, or identifying info')
@@ -92,6 +99,16 @@ class AuditTrail(models.Model):
             models.Index(fields=['-timestamp']),
             models.Index(fields=['entity_type', 'entity_id']),
         ]
+
+    @property
+    def role(self):
+        return self.user.role if self.user else None
+
+    @property
+    def user_display_name(self):
+        if not self.user:
+            return 'System'
+        return getattr(self.user, 'username', None) or getattr(self.user, 'email', 'System')
 
     def __str__(self):
         return f'{self.action} {self.entity_type} {self.entity_id} on {self.timestamp}'

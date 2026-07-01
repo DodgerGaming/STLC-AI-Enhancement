@@ -44,12 +44,7 @@ export default function SalesTransactions() {
 
   return (
     <div>
-      <div>
-        <h1 className="text-2xl font-extrabold text-on-surface">Sales Transactions</h1>
-        <p className="mt-1 text-sm text-on-surface-variant">Recent sales transactions (read-only).</p>
-      </div>
-
-      <div className="mt-6 overflow-hidden rounded-xl border border-outline-variant bg-surface shadow-card">
+      <div className="mt-2 overflow-hidden rounded-xl border border-outline-variant bg-surface shadow-card">
         <div className="flex items-center justify-between px-4 py-4">
           <div>
             <h3 className="text-sm font-bold text-on-surface">Recent Transactions</h3>

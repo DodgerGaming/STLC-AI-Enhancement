@@ -88,14 +88,10 @@ export default function MaterialCard({ material }) {
   const openQuickAdd = async (e) => {
     e.stopPropagation()
     setLoadingBatches(true)
-    setLocalCustomer(customerName || '')
     setQty(1)
     setAdded(false)
     setCutError('')
     setBatchError('')
-    setFulfillmentError('')
-    setDetailsModalOpen(false)
-    setAttemptedDetails(false)
 
     try {
       const fetchedBatches = await fetchBatchesForMaterial(material.material_id)
@@ -149,24 +145,11 @@ export default function MaterialCard({ material }) {
     }
     setCutError('')
 
-    if (!isValidName(localCustomer)) {
-      setBatchError('Enter a valid customer name (letters only, min 2 characters)')
-      return
-    }
-
-    const fulfillmentMsg = getFulfillmentError()
-    if (fulfillmentMsg) {
-      setAttemptedDetails(true)
-      setFulfillmentError(fulfillmentMsg)
-      setDetailsModalOpen(true)
-      return
-    }
-    setFulfillmentError('')
-
-    if (localCustomer.trim()) setCustomerName(localCustomer.trim())
+    // Add to cart - no customer details needed yet
     addToCart({
       materialId: material.material_id,
       materialName: material.material_name,
+      materialDescription: material.description || '',
       batchCode: selectedBatch.batch_code,
       sizeSqft: selectedBatch.size_sqft,
       unit: material.unit,
@@ -237,7 +220,7 @@ export default function MaterialCard({ material }) {
             <div>
               <p className="text-on-surface-variant">In Stock</p>
               <p className="font-semibold text-on-surface">
-                {formatNumber(Number(material.totalStock ?? material.totalstock ?? material.total_stock ?? 0), material.unit === SCRAP_UNIT ? 1 : 0)} {material.unit}
+                {formatNumber(Number(material.totalStock ?? material.totalstock ?? material.total_stock ?? 0), 2)} {material.unit}
               </p>
             </div>
           </div>
@@ -270,54 +253,9 @@ export default function MaterialCard({ material }) {
 
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
 
-              {/* ── CUSTOMER LOGISTICS ── */}
-              <div className="rounded-xl border border-outline-variant bg-surface-variant/30 px-4 py-3 space-y-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Customer Logistics</p>
-
-                <div>
-                  <label className="text-xs font-semibold text-on-surface-variant">
-                    Customer Name <span className="text-error">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={localCustomer}
-                    onChange={(e) => setLocalCustomer(e.target.value)}
-                    placeholder="e.g. Juan De Cruz"
-                    className="mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-on-surface-variant">Fulfillment</label>
-                  <div className="mt-1.5 flex w-fit rounded-lg border border-outline-variant bg-surface p-1 text-xs font-semibold">
-                    {['Delivery', 'Pick-up'].map((option) => (
-                      <button
-                        key={option}
-                        type="button"
-                        onClick={() => { setFulfillment(option); if (fulfillmentError) setFulfillmentError('') }}
-                        className={['rounded-md px-4 py-1.5 transition-colors', fulfillment === option ? 'bg-primary text-surface' : 'text-on-surface-variant hover:text-on-surface'].join(' ')}
-                      >
-                        {option}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {fulfillment && (
-                  <button
-                    type="button"
-                    onClick={() => { setAttemptedDetails(false); setDetailsModalOpen(true) }}
-                    className="w-full rounded-lg border border-outline-variant bg-surface px-4 py-2 text-xs font-semibold text-on-surface transition-colors hover:bg-surface-variant"
-                  >
-                    {!getFulfillmentError() ? '✓ ' : ''}{fulfillment === 'Delivery' ? 'Add Delivery Details' : 'Add Pick-up Details'}
-                  </button>
-                )}
-                {fulfillmentError && <p className="text-xs text-error">{fulfillmentError}</p>}
-              </div>
-
               {/* ── MATERIAL CUSTOMIZATIONS ── */}
               <div className="rounded-xl border border-outline-variant bg-surface-variant/30 px-4 py-3 space-y-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Material Customizations</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Select Material & Customize</p>
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
@@ -338,13 +276,20 @@ export default function MaterialCard({ material }) {
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold text-on-surface-variant">Quantity (hides)</label>
+                    <label className="text-xs font-semibold text-on-surface-variant">
+                      Quantity (hides)
+                      {selectedBatch && (
+                        <span className="ml-1 text-on-surface-variant">
+                          — {selectedBatch.quantity} available
+                        </span>
+                      )}
+                    </label>
                     <div className="mt-1.5 flex w-fit items-center rounded-lg border border-outline-variant bg-surface">
                       <button type="button" onClick={() => setQty((q) => Math.max(1, q - 1))} className="flex h-9 w-9 items-center justify-center text-on-surface-variant hover:text-primary">
                         <Minus size={14} />
                       </button>
                       <span className="w-10 text-center text-sm font-semibold text-on-surface">{qty}</span>
-                      <button type="button" onClick={() => setQty((q) => Math.min(99, q + 1))} className="flex h-9 w-9 items-center justify-center text-on-surface-variant hover:text-primary">
+                      <button type="button" onClick={() => setQty((q) => Math.min(selectedBatch?.quantity || 1, q + 1))} className="flex h-9 w-9 items-center justify-center text-on-surface-variant hover:text-primary">
                         <Plus size={14} />
                       </button>
                     </div>
@@ -366,6 +311,14 @@ export default function MaterialCard({ material }) {
                     <option value="Cut leather">Cut leather</option>
                   </select>
                 </div>
+
+                {selectedBatch && (
+                  <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-primary">Selected Batch</p>
+                    <p className="mt-1.5 text-sm font-extrabold text-on-surface">{selectedBatchCode}</p>
+                    <p className="mt-0.5 text-xs text-on-surface-variant">{formatNumber(selectedBatch.size_sqft, 2)} {material.unit} per hide</p>
+                  </div>
+                )}
 
                 {selectedBatch && (
                   <div className="flex items-center justify-between rounded-lg border border-outline-variant bg-surface px-3 py-2.5">
@@ -431,7 +384,6 @@ export default function MaterialCard({ material }) {
                 onClick={handleAddToCart}
                 disabled={
                   !selectedBatch ||
-                  !localCustomer.trim() ||
                   !cutOption ||
                   (cutOption === 'Cut leather' && (!customWidth.trim() || !customHeight.trim()))
                 }
@@ -450,8 +402,8 @@ export default function MaterialCard({ material }) {
         </div>
       )}
 
-      {/* Order Details — fulfillment specifics, same fields as the main Order Details modal */}
-      {detailsModalOpen && (
+      {/* Order Details modal - disabled, moved to checkout */}
+      {false && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-primary-dark/50 px-4 backdrop-blur-[2px]"
           onClick={(e) => e.stopPropagation()}

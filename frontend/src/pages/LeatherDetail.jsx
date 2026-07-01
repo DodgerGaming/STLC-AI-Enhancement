@@ -23,7 +23,8 @@ export default function LeatherDetail() {
   const [cutOption, setCutOption] = useState('No cutting')
   const [customWidth, setCustomWidth] = useState('')
   const [customHeight, setCustomHeight] = useState('')
-  const firstAvailable = batches.find((b) => b.status === 'Available')
+  const availableBatches = batches.filter((b) => Number(b.quantity || 0) > 0)
+  const firstAvailable = availableBatches.find((b) => b.status === 'Available')
 
   useEffect(() => {
     let active = true
@@ -70,12 +71,12 @@ export default function LeatherDetail() {
     openSummary,
   } = useCart()
 
-  const selectedBatch = batches.find((b) => b.batch_code === selectedBatchCode)
+  const selectedBatch = availableBatches.find((b) => b.batch_code === selectedBatchCode)
   // compute total stock: prefer material.totalStock from API, fallback to summing batches
   const computedBatchStock = batches.reduce((sum, b) => sum + (Number(b.size_sqft || 0) * Number(b.quantity || 0)), 0)
   const apiStockValue = material?.totalStock ?? material?.totalstock ?? material?.total_stock
   const totalStock = apiStockValue != null ? Number(apiStockValue) : computedBatchStock
-  const hasStock = totalStock > 0
+  const hasStock = availableBatches.length > 0
   const tint = material?.tint || '#7A3B23'
   // max purchasable quantity is capped by how many units of the selected batch are actually in stock
   const maxQty = selectedBatch ? Math.max(1, Number(selectedBatch.quantity) || 0) : 99
@@ -342,12 +343,12 @@ export default function LeatherDetail() {
               <option value="" disabled>
                 Choose Hide / Batch
               </option>
-              {batches.map((b) => (
-                <option key={b.batch_code} value={b.batch_code} disabled={b.status !== 'Available'}>
-                  Batch {b.batch_code} — {formatNumber(b.size_sqft, 2)} {material.unit}, {formatNumber(b.quantity, 0)} in stock
-                  {b.status !== 'Available' ? ` (${b.status})` : ''}
-                </option>
-              ))}
+              {availableBatches.map((b) => (
+                  <option key={b.batch_code} value={b.batch_code} disabled={b.status !== 'Available'}>
+                    Batch {b.batch_code} — {formatNumber(b.size_sqft, 2)} {material.unit}, {formatNumber(b.quantity, 0)} in stock
+                    {b.status !== 'Available' ? ` (${b.status})` : ''}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -628,7 +629,7 @@ export default function LeatherDetail() {
       <div className="mt-10">
         <h3 className="mb-3 text-sm font-bold text-on-surface">Individual Hide Inventory</h3>
         <HideInventoryTable
-          batches={batches}
+          batches={availableBatches}
           unit={material.unit}
           selectedBatchCode={selectedBatchCode}
           onSelect={(b) => setSelectedBatchCode(b.batch_code)}

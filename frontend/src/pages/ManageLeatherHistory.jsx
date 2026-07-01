@@ -44,6 +44,10 @@ export default function ManageLeatherHistory() {
 
   // Always pulls the latest batches straight from the backend — single source of truth,
   // shared by Leather Catalog, Manage Leather, and Full Leather History.
+  const userRole = localStorage.getItem('userRole') || 'Clerk'
+  const isAdmin = userRole === 'Admin'
+  const isSupervisor = userRole === 'Supervisor'
+
   const refreshHistory = () => {
     setLoading(true)
     return fetchBatches({ limit: 100 })
@@ -79,6 +83,7 @@ export default function ManageLeatherHistory() {
   })
 
   const openEditModal = (item) => {
+    if (!isSupervisor) return
     setEditingItem(item)
     setEditData({ ...item })
   }
@@ -112,6 +117,12 @@ export default function ManageLeatherHistory() {
   }
 
   const deleteHistoryItem = (batchCode) => {
+    if (!isAdmin) return
+    const confirmed = window.confirm(
+      `Delete batch ${batchCode}? This cannot be undone. Proceed only if you are sure.`
+    )
+    if (!confirmed) return
+
     deleteBatch(batchCode)
       .catch((err) => console.error('Failed to delete batch', err))
       .finally(() => refreshHistory())
@@ -129,8 +140,7 @@ export default function ManageLeatherHistory() {
             <ArrowLeft size={16} />
           </button>
           <div>
-            <h1 className="text-2xl font-extrabold text-on-surface">Full Leather History</h1>
-            <p className="mt-0.5 text-sm text-on-surface-variant">
+            <p className="text-sm text-on-surface-variant">
               Inventory batches with search, status filter, and edit / delete actions.
             </p>
           </div>

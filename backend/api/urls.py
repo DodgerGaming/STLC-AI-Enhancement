@@ -10,6 +10,7 @@ urlpatterns = [
     path('batches/', views.create_batch, name='create-batch'),
     path('batches/<str:batch_code>/', views.batch_detail, name='batch-detail'),
     path('orders/', views.orders, name='orders'),
+    path('orders/<str:order_id>/', views.order_detail, name='order-detail'),
     path('audit-trail/', views.audit_trail_list, name='audit-trail-list'),
     path('authentication/', include('api.authentication.urls')),
 ]

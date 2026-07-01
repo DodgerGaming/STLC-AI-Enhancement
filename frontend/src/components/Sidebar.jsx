@@ -19,6 +19,7 @@ export default function Sidebar({ isOpen, onClose }) {
   const { logout } = useAuth()
   const userEmail = localStorage.getItem('userEmail') || 'User'
   const userRole = localStorage.getItem('userRole') || 'Clerk'
+  const isAdminOrSupervisor = userRole === 'Admin' || userRole === 'Supervisor'
   const userInitials = userEmail
     .split('@')[0]
     .split('')
@@ -54,7 +55,7 @@ export default function Sidebar({ isOpen, onClose }) {
 
       <nav className="mt-2 flex-1 px-3">
         <ul className="space-y-1">
-          {(userRole === 'Admin' ? NAV_ITEMS_ADMIN : NAV_ITEMS_CLERK).map(({ to, label, icon: Icon, end }) => (
+          {(isAdminOrSupervisor ? NAV_ITEMS_ADMIN : NAV_ITEMS_CLERK).map(({ to, label, icon: Icon, end }) => (
             <li key={to}>
               <NavLink
                 to={to}

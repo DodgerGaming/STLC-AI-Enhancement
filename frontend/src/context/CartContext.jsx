@@ -70,44 +70,52 @@ export function CartProvider({ children }) {
     () => items.reduce((sum, it) => sum + (it.customSize ? 50 : 0), 0),
     [items],
   )
-  const vat = useMemo(() => Number((cuttingFee * 0.12).toFixed(2)), [cuttingFee])
+  const vat = useMemo(() => 0, []) // VAT disabled for now
   const shipping = useMemo(() => (fulfillment === 'Delivery' ? SHIPPING_FEE : 0), [fulfillment])
-  const total = useMemo(() => itemsSubtotal + shipping + cuttingFee + vat, [itemsSubtotal, shipping, cuttingFee, vat])
+  const total = useMemo(() => itemsSubtotal + shipping + cuttingFee, [itemsSubtotal, shipping, cuttingFee])
   const itemCount = useMemo(() => items.reduce((sum, it) => sum + it.qty, 0), [items])
 
   const confirmSale = useCallback(async () => {
-    const payload = {
-      customer: customerName,
-      fulfillment,
-      delivery_address: deliveryAddress,
-      order_description: orderDescription,
-      scheduled_date: scheduledDate || null,
-      scheduled_time: scheduledTime || null,
-      payment_method: paymentMethod,
-      items: items.map((item) => ({
-        material_name: item.materialName,
-        batch_code: item.batchCode,
-        unit: item.unit,
-        unit_price: item.unitPrice,
-        qty: item.qty,
-        size_sqft: item.sizeSqft,
-        custom_size: item.customSize || '',
-        color: item.color || '',
-      })),
+    // Create separate order for each item in cart
+    const orderResponses = []
+    
+    for (const item of items) {
+      const payload = {
+        customer: customerName,
+        fulfillment,
+        delivery_address: deliveryAddress,
+        order_description: item.materialDescription || '', // Use material description
+        scheduled_date: scheduledDate || null,
+        scheduled_time: scheduledTime || null,
+        payment_method: paymentMethod,
+        items: [{
+          material_name: item.materialName,
+          batch_code: item.batchCode,
+          unit: item.unit,
+          unit_price: item.unitPrice,
+          qty: item.qty,
+          size_sqft: item.sizeSqft,
+          custom_size: item.customSize || '',
+          color: item.color || '',
+        }],
+      }
+
+      const orderResponse = await createOrder(payload)
+      orderResponses.push(orderResponse)
     }
 
-    const orderResponse = await createOrder(payload)
-
+    // Store last confirmation with count of transactions created
     setLastConfirmation({
-      transactionId: orderResponse.order_id,
-      total: Number(orderResponse.total),
-      itemCount: Number(orderResponse.item_count),
+      transactionId: orderResponses[0]?.order_id,
+      total: orderResponses.reduce((sum, r) => sum + Number(r.total || 0), 0),
+      itemCount: items.reduce((sum, it) => sum + it.qty, 0),
+      transactionCount: orderResponses.length,
     })
     clearCart()
     clearOrderDetails()
     setIsSummaryOpen(false)
-    return orderResponse
-  }, [customerName, fulfillment, deliveryAddress, orderDescription, scheduledDate, scheduledTime, paymentMethod, items, clearCart, clearOrderDetails])
+    return orderResponses
+  }, [customerName, fulfillment, deliveryAddress, scheduledDate, scheduledTime, paymentMethod, items, clearCart, clearOrderDetails])
 
   const value = {
     items,

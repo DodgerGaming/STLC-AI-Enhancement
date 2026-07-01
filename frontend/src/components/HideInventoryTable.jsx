@@ -2,7 +2,7 @@ import StatusPill from './StatusPill.jsx'
 import { formatNumber } from '../utils/format.js'
 
 export default function HideInventoryTable({ batches, unit = 'sqft', onSelect, selectedBatchCode }) {
-  const visible = batches
+  const visible = batches.filter((batch) => Number(batch.quantity || 0) > 0)
 
   return (
     <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface shadow-card">
@@ -16,6 +16,7 @@ export default function HideInventoryTable({ batches, unit = 'sqft', onSelect, s
             <tr className="border-b border-outline-variant bg-surface-variant/60 text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
               <th className="px-5 py-3">Batch Code</th>
               <th className="px-5 py-3">Size ({unit})</th>
+              <th className="px-5 py-3">Quantity</th>
               <th className="px-5 py-3">Status</th>
               <th className="px-5 py-3 text-right">Action</th>
             </tr>
@@ -35,6 +36,9 @@ export default function HideInventoryTable({ batches, unit = 'sqft', onSelect, s
                   <td className="px-5 py-3 font-semibold text-on-surface">{batch.batch_code}</td>
                   <td className="px-5 py-3 text-on-surface-variant">
                     {formatNumber(batch.size_sqft, 2)}
+                  </td>
+                  <td className="px-5 py-3 text-on-surface-variant">
+                    {formatNumber(batch.quantity, 0)}
                   </td>
                   <td className="px-5 py-3">
                     <StatusPill status={batch.status} />

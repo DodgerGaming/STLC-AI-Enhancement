@@ -1,18 +1,65 @@
-import { useEffect, useState } from 'react'
-import { Wallet, Layers, ShoppingCart, AlertTriangle } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import { Wallet, Layers, ShoppingCart, AlertTriangle, Download, Eye } from 'lucide-react'
 import KpiCard from '../components/KpiCard.jsx'
 import StatusPill from '../components/StatusPill.jsx'
 import SalesByTypeBarChart from '../components/SalesByTypeBarChart.jsx'
 import RevenueShareDonutChart from '../components/RevenueShareDonutChart.jsx'
-import { dashboardKpis, salesByTypeData, revenueShareData, SCRAP_UNIT } from '../data/mockLeather.js'
-import { fetchOrders } from '../data/apiLeather.js'
+import LowStockDetailsModal from '../components/LowStockDetailsModal.jsx'
+import { SCRAP_UNIT } from '../data/mockLeather.js'
+import { fetchBatches, fetchMaterials, fetchOrders, deleteOrder } from '../data/apiLeather.js'
 import { formatPeso, formatNumber } from '../utils/format.js'
+
+const LEATHER_TYPE_COLORS = {
+  Cowhide: '#8B2525',
+  'Goat Skin': '#C76B6B',
+  'Scrap Leather': '#E8B4B4',
+}
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('Delivery')
   const [sales, setSales] = useState([])
+  const [materials, setMaterials] = useState([])
+  const [batches, setBatches] = useState([])
   const [editingSale, setEditingSale] = useState(null)
-  const RECENT_LIMIT = 5
+  const [selectedDate, setSelectedDate] = useState('')
+  const [isLowStockDetailsOpen, setIsLowStockDetailsOpen] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [isOrdersLoading, setIsOrdersLoading] = useState(true)
+  const PAGE_SIZE = 10
+  const userRole = localStorage.getItem('userRole') || 'Clerk'
+  const isSupervisor = userRole === 'Supervisor'
+  const isAdmin = userRole === 'Admin'
+
+  const loadOrders = useCallback(async () => {
+    try {
+      setIsOrdersLoading(true)
+      const data = await fetchOrders()
+      if (!Array.isArray(data)) return
+      const mapped = data.map((o) => ({
+        order_id: o.order_id,
+        customer: o.customer,
+        material: (o.items && o.items.length > 0) ? o.items.map((it) => it.material_name).join(', ') : '—',
+        qty: o.item_count || (o.items && o.items.reduce((s, it) => s + (it.qty || 0), 0)) || 0,
+        total: o.total || 0,
+        address: o.delivery_address || o.address || '—',
+        description: o.order_description || '—',
+        paymentMethod: o.payment_method || '—',
+        status: o.status || 'Pending',
+        fulfillment: normalizeFulfillment(o.fulfillment) === 'pickup' ? 'Pick-up' : normalizeFulfillment(o.fulfillment) === 'delivery' ? 'Delivery' : (o.fulfillment || 'Delivery'),
+        scheduledDate: o.scheduled_date,
+        scheduledTime: o.scheduled_time,
+        createdAt: o.created_at,
+        createdDate: o.created_at ? o.created_at.slice(0, 10) : '',
+        raw: o,
+      }))
+      setSales(mapped)
+    } catch (error) {
+      console.error('Failed to load orders:', error)
+    } finally {
+      setIsOrdersLoading(false)
+    }
+  }, [])
 
   const normalizeFulfillment = (value) => {
     const v = (value || '').toLowerCase().trim()
@@ -21,45 +68,315 @@ export default function Dashboard() {
     return v
   }
 
+  const formatDateKey = (value) => {
+    if (!value) return null
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return null
+    return date.toISOString().slice(0, 10)
+  }
+
+  const classifyLeatherType = (materialName = '') => {
+    const lower = materialName.toLowerCase()
+    if (lower.includes('goat')) return 'Goat Skin'
+    if (lower.includes('scrap')) return 'Scrap Leather'
+    return 'Cowhide'
+  }
+
   const filterBuyFulfillment = (sale) => {
     const normalized = normalizeFulfillment(sale.fulfillment)
     const tabNormalized = normalizeFulfillment(activeTab)
     return normalized === tabNormalized
   }
 
-  const visibleSales = sales.filter(filterBuyFulfillment).slice(0, RECENT_LIMIT)
+  const filteredSales = useMemo(() => {
+    const dateKey = selectedDate || ''
+    return sales.filter((sale) => {
+      if (!dateKey) return true
+      return sale.createdDate === dateKey
+    })
+  }, [sales, selectedDate])
+
+  const salesByTypeData = useMemo(() => {
+    const totals = {}
+    filteredSales.forEach((sale) => {
+      ;(sale.raw?.items || []).forEach((item) => {
+        const type = classifyLeatherType(item.material_name)
+        const qty = Number(item.size_sqft ?? item.qty ?? 0) || 0
+        const revenue = Number(item.unit_price ?? 0) * Number(item.qty ?? 0)
+        const unit = type === 'Scrap Leather' ? SCRAP_UNIT : 'sqft'
+
+        if (!totals[type]) {
+          totals[type] = { type, qty: 0, unit, revenue: 0 }
+        }
+
+        totals[type].qty += qty
+        totals[type].revenue += revenue
+      })
+    })
+
+    return Object.values(totals).map((entry) => ({
+      ...entry,
+      qty: Math.round(entry.qty * 100) / 100,
+      revenue: Math.round(entry.revenue * 100) / 100,
+    }))
+  }, [filteredSales])
+
+  const dashboardKpis = useMemo(() => {
+    return filteredSales.reduce(
+      (acc, sale) => {
+        acc.totalRevenue += Number(sale.total) || 0
+        acc.totalOrders += 1
+        ;(sale.raw?.items || []).forEach((item) => {
+          const type = classifyLeatherType(item.material_name)
+          const qty = Number(item.size_sqft ?? item.qty ?? 0) || 0
+          if (type === 'Scrap Leather') {
+            acc.leatherSoldKg += qty
+          } else {
+            acc.leatherSoldSqft += qty
+          }
+        })
+        return acc
+      },
+      { totalRevenue: 0, leatherSoldSqft: 0, leatherSoldKg: 0, totalOrders: 0 },
+    )
+  }, [filteredSales])
+
+  const isUnavailableBatchStatus = (status) => {
+    const normalized = (status || '').toLowerCase().trim()
+    return normalized === 'out of stock' || normalized === 'depleted'
+  }
+
+  const lowStockData = useMemo(() => {
+    const grouped = batches.reduce((acc, batch) => {
+      if (!isUnavailableBatchStatus(batch.status)) return acc
+
+      const itemLabel = batch.material_name || batch.material_id || 'Unknown'
+      if (!acc[itemLabel]) acc[itemLabel] = { item: itemLabel, count: 0, totalSize: 0 }
+      acc[itemLabel].count += 1
+      acc[itemLabel].totalSize += Number(batch.size_sqft || 0) * Number(batch.quantity || 0)
+      return acc
+    }, {})
+
+    return Object.values(grouped).sort((a, b) => b.totalSize - a.totalSize)
+  }, [batches])
+
+  const lowStockBatches = useMemo(
+    () => batches
+      .filter((batch) => isUnavailableBatchStatus(batch.status))
+      .map((batch) => ({
+        batchCode: batch.batch_code,
+        materialName: batch.material_name || batch.material_id || 'Unknown',
+        leatherType: batch.leather_type || 'Unknown',
+        sizeSqft: Number(batch.size_sqft || 0),
+        quantity: Number(batch.quantity || 0),
+        status: batch.status || 'Unknown',
+      })),
+    [batches],
+  )
+
+  const lowStockItems = useMemo(
+    () => lowStockData.length,
+    [lowStockData],
+  )
+
+  const openLowStockDetails = () => setIsLowStockDetailsOpen(true)
+  const closeLowStockDetails = () => setIsLowStockDetailsOpen(false)
+
+  const revenueShareData = useMemo(() => {
+    const totalRevenue = dashboardKpis.totalRevenue || 1
+    return salesByTypeData.map((entry) => ({
+      type: entry.type,
+      value: Math.round((entry.revenue / totalRevenue) * 100),
+      color: LEATHER_TYPE_COLORS[entry.type] ?? '#C76B6B',
+    }))
+  }, [salesByTypeData, dashboardKpis.totalRevenue])
+
+  const visibleSales = useMemo(() => {
+    const filtered = filteredSales.filter(filterBuyFulfillment)
+    return [...filtered].sort((a, b) => {
+      const aTime = new Date(a.createdAt).getTime() || 0
+      const bTime = new Date(b.createdAt).getTime() || 0
+      return bTime - aTime
+    })
+  }, [filteredSales, activeTab])
+  const pageCount = Math.max(1, Math.ceil(visibleSales.length / PAGE_SIZE))
+  const paginatedSales = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE
+    return visibleSales.slice(start, start + PAGE_SIZE)
+  }, [visibleSales, currentPage])
+
+  useEffect(() => {
+    if (currentPage > pageCount) {
+      setCurrentPage(pageCount)
+    }
+  }, [currentPage, pageCount])
+
+  const downloadCsv = (filename, rows, headers) => {
+    const content = [headers.join(','), ...rows.map((row) => headers.map((header) => {
+      const value = row[header]
+      const escaped = String(value ?? '').replace(/"/g, '""')
+      return `"${escaped}"`
+    }).join(','))].join('\r\n')
+
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', filename)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportDashboardCsv = useCallback(() => {
+    const summaryRows = [
+      {
+        Type: 'Total Revenue',
+        Quantity: formatPeso(dashboardKpis.totalRevenue),
+        Unit: selectedDate ? `Sales on ${selectedDate}` : 'All sales',
+        Revenue: '',
+      },
+      {
+        Type: 'Leather Sold',
+        Quantity: `${formatNumber(dashboardKpis.leatherSoldSqft)} sqft + ${formatNumber(dashboardKpis.leatherSoldKg)} ${SCRAP_UNIT}`,
+        Unit: selectedDate ? `Filtered by ${selectedDate}` : 'Across all materials',
+        Revenue: '',
+      },
+      {
+        Type: 'Total Orders',
+        Quantity: dashboardKpis.totalOrders,
+        Unit: selectedDate ? `Orders on ${selectedDate}` : 'All orders',
+        Revenue: '',
+      },
+      {
+        Type: 'Low Stock Items',
+        Quantity: lowStockItems,
+        Unit: 'Need restocking',
+        Revenue: '',
+      },
+      { Type: '', Quantity: '', Unit: '', Revenue: '' },
+    ]
+
+    const rows = [
+      ...summaryRows,
+      ...salesByTypeData.map((entry) => ({
+        Type: entry.type,
+        Quantity: entry.qty,
+        Unit: entry.unit,
+        Revenue: entry.revenue,
+      })),
+      { Type: '', Quantity: '', Unit: '', Revenue: '' },
+      { Type: 'Low Stock Graph', Quantity: 'Material', Unit: 'Out-of-stock batches', Revenue: 'Total sqft needed' },
+      ...lowStockData.map((entry) => ({
+        Type: entry.item,
+        Quantity: entry.count,
+        Unit: 'batches',
+        Revenue: `${formatNumber(entry.totalSize)} sqft`,
+      })),
+    ]
+
+    downloadCsv(`dashboard-sales-${selectedDate || 'all'}.csv`, rows, ['Type', 'Quantity', 'Unit', 'Revenue'])
+  }, [dashboardKpis, lowStockItems, lowStockData, salesByTypeData, selectedDate])
+
+  const handleExportTransactionsCsv = useCallback(() => {
+    const rows = filteredSales.map((sale) => ({
+      'Order ID': sale.order_id,
+      Customer: sale.customer,
+      Material: sale.material,
+      Qty: sale.qty,
+      Total: sale.total,
+      Fulfillment: sale.fulfillment,
+      Address: sale.address,
+      Description: sale.description,
+      Payment: sale.paymentMethod,
+      Status: sale.status,
+      'Created At': sale.createdAt,
+      'Scheduled Date': sale.scheduledDate,
+      'Scheduled Time': sale.scheduledTime,
+    }))
+    downloadCsv(`transactions-${selectedDate || 'all'}.csv`, rows, [
+      'Order ID',
+      'Customer',
+      'Material',
+      'Qty',
+      'Total',
+      'Fulfillment',
+      'Address',
+      'Description',
+      'Payment',
+      'Status',
+      'Created At',
+      'Scheduled Date',
+      'Scheduled Time',
+    ])
+  }, [filteredSales, selectedDate])
+
+  const clearDateFilter = () => setSelectedDate('')
+
+  const { setPageHeaderActions } = useOutletContext()
+
+  useEffect(() => {
+    if (!setPageHeaderActions) return
+
+    setPageHeaderActions(
+      <div className="flex flex-wrap items-center gap-2 justify-end">
+        <label className="flex items-center gap-2 text-xs sm:text-sm">
+          <span className="font-semibold text-on-surface-variant">Date</span>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(formatDateKey(e.target.value) || '')}
+            className="rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={clearDateFilter}
+          className="rounded-full border border-outline-variant bg-surface px-3 py-2 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant sm:px-4 sm:text-sm"
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          onClick={handleExportDashboardCsv}
+          className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-surface transition-colors hover:bg-primary-dark sm:px-4 sm:text-sm"
+        >
+          <Download size={14} />
+          Export Dashboard CSV
+        </button>
+      </div>,
+    )
+
+    return () => setPageHeaderActions(null)
+  }, [selectedDate, setPageHeaderActions, clearDateFilter, handleExportDashboardCsv])
 
   // Load orders from backend on mount
   useEffect(() => {
     let active = true
-    fetchOrders()
+
+    if (active) {
+      loadOrders()
+    }
+
+    fetchMaterials()
       .then((data) => {
         if (!active || !Array.isArray(data)) return
-        // Map backend order objects into the shape the table expects
-        const mapped = data.map((o) => ({
-          order_id: o.order_id,
-          customer: o.customer,
-          // pick first material or join multiple
-          material: (o.items && o.items.length > 0) ? o.items.map((it) => it.material_name).join(', ') : '—',
-          qty: o.item_count || (o.items && o.items.reduce((s, it) => s + (it.qty || 0), 0)) || 0,
-          total: o.total || 0,
-          address: o.delivery_address || o.address || '—',
-          description: o.order_description || '—',
-          paymentMethod: o.payment_method || '—',
-          status: o.status || 'Pending',
-          fulfillment: normalizeFulfillment(o.fulfillment) === 'pickup' ? 'Pick-up' : normalizeFulfillment(o.fulfillment) === 'delivery' ? 'Delivery' : (o.fulfillment || 'Delivery'),
-          scheduledDate: o.scheduled_date,
-          scheduledTime: o.scheduled_time,
-          createdAt: o.created_at,
-          raw: o,
-        }))
-        setSales(mapped)
+        setMaterials(data)
       })
       .catch(() => {})
+
+    fetchBatches({ limit: 200 })
+      .then((data) => {
+        if (!active || !Array.isArray(data)) return
+        setBatches(data)
+      })
+      .catch(() => {})
+
     return () => {
       active = false
     }
-  }, [])
+  }, [loadOrders])
 
   const openEditModal = (sale) => setEditingSale({ ...sale })
   const closeEditModal = () => setEditingSale(null)
@@ -70,9 +387,21 @@ export default function Dashboard() {
     closeEditModal()
   }
 
-  const deleteSale = (orderId) => {
-    setSales((prev) => prev.filter((sale) => sale.order_id !== orderId))
-    if (editingSale?.order_id === orderId) closeEditModal()
+  const deleteSale = async (orderId) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete order ${orderId}? This action cannot be undone.`,
+    )
+    if (!confirmed) return
+
+    try {
+      await deleteOrder(orderId)
+      await loadOrders()
+      setCurrentPage(1)
+      if (editingSale?.order_id === orderId) closeEditModal()
+    } catch (error) {
+      console.error('Failed to delete order:', error)
+      // Optional: show user-visible error handling here
+    }
   }
 
   const handleEditChange = (field, value) => {
@@ -81,18 +410,11 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div>
-        <h1 className="text-2xl font-extrabold text-on-surface">Dashboard</h1>
-        <p className="mt-1 text-sm text-on-surface-variant">
-          Overview of leather sales performance.
-        </p>
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Total Revenue"
           value={formatPeso(dashboardKpis.totalRevenue)}
-          subtitle="This month"
+          subtitle={selectedDate ? `Sales on ${selectedDate}` : 'All sales'}
           icon={Wallet}
           trend={{ direction: 'up', value: '+12.4%' }}
         />
@@ -101,42 +423,60 @@ export default function Dashboard() {
           value={`${formatNumber(dashboardKpis.leatherSoldSqft)} sqft + ${formatNumber(
             dashboardKpis.leatherSoldKg,
           )} ${SCRAP_UNIT}`}
-          subtitle="Across all materials"
+          subtitle={selectedDate ? `Filtered by ${selectedDate}` : 'Across all materials'}
           icon={Layers}
         />
         <KpiCard
           label="Total Orders"
           value={formatNumber(dashboardKpis.totalOrders)}
-          subtitle="This month"
+          subtitle={selectedDate ? `Orders on ${selectedDate}` : 'All orders'}
           icon={ShoppingCart}
         />
-        <KpiCard
-          label="Low Stock Items"
-          value={formatNumber(dashboardKpis.lowStockItems)}
-          subtitle="Need restocking"
-          icon={AlertTriangle}
-          tone={dashboardKpis.lowStockItems > 0 ? 'danger' : 'default'}
-        />
+        <div>
+          <button
+            type="button"
+            onClick={openLowStockDetails}
+            className="w-full text-left"
+            aria-label="Open stock need details"
+          >
+            <KpiCard
+              label="Low Stock Items"
+              value={formatNumber(lowStockItems)}
+              subtitle="Need restocking"
+              icon={Eye}
+              tone={lowStockItems > 0 ? 'danger' : 'default'}
+            />
+          </button>
+        </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
         <SalesByTypeBarChart data={salesByTypeData} />
-        <RevenueShareDonutChart data={revenueShareData} />
+        <RevenueShareDonutChart data={revenueShareData} loading={isOrdersLoading} />
       </div>
+
+      <LowStockDetailsModal
+        open={isLowStockDetailsOpen}
+        onClose={closeLowStockDetails}
+        data={lowStockBatches}
+      />
 
       <div className="mt-6 overflow-hidden rounded-xl border border-outline-variant bg-surface shadow-card">
         <div className="flex flex-col gap-3 border-b border-outline-variant px-4 py-4 sm:gap-4 sm:px-5 md:flex-row md:items-center md:justify-between">
           <div>
             <h3 className="text-sm font-bold text-on-surface">Recent Transactions</h3>
-            <p className="text-xs text-on-surface-variant">Toggle between delivery and pickup results. Scroll right for more details &rarr;</p>
+            <p className="text-xs text-on-surface-variant">Toggle between delivery and pickup below.</p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {['Delivery', 'Pick-up'].map((option) => (
               <button
                 key={option}
                 type="button"
-                onClick={() => setActiveTab(option)}
+                onClick={() => {
+                  setActiveTab(option)
+                  setCurrentPage(1)
+                }}
                 className={`whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition-colors sm:px-4 sm:text-sm ${
                   activeTab === option
                     ? 'bg-primary text-surface'
@@ -146,6 +486,14 @@ export default function Dashboard() {
                 {option}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={handleExportTransactionsCsv}
+              className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-[#8B2525] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#6f1b1b] sm:px-4 sm:text-sm"
+            >
+              <Download size={14} />
+              Export Transactions CSV
+            </button>
           </div>
         </div>
 
@@ -177,7 +525,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {visibleSales.map((sale) => (
+              {paginatedSales.map((sale) => (
                 <tr key={sale.order_id} className="border-b border-outline-variant last:border-0">
                   <td className="whitespace-nowrap px-3 py-3 font-semibold text-on-surface sm:px-5">{sale.order_id}</td>
                   <td className="whitespace-nowrap px-3 py-3 text-on-surface-variant sm:px-5">{sale.customer}</td>
@@ -204,20 +552,24 @@ export default function Dashboard() {
                     <StatusPill status={sale.status} />
                   </td>
                   <td className="whitespace-nowrap px-3 py-3 text-right sm:px-5">
-                    <button
-                      type="button"
-                      onClick={() => openEditModal(sale)}
-                      className="mr-2 rounded-full border border-outline-variant px-3 py-1 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteSale(sale.order_id)}
-                      className="rounded-full border border-error/20 bg-error/5 px-3 py-1 text-xs font-semibold text-error hover:bg-error/10"
-                    >
-                      Delete
-                    </button>
+                    {isSupervisor && (
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(sale)}
+                        className="mr-2 rounded-full border border-outline-variant px-3 py-1 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => deleteSale(sale.order_id)}
+                        className="rounded-full border border-error/20 bg-error/5 px-3 py-1 text-xs font-semibold text-error hover:bg-error/10"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -235,6 +587,32 @@ export default function Dashboard() {
           </table>
             )
           })()}
+        </div>
+        <div className="flex flex-col gap-3 border-t border-outline-variant bg-surface px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <p className="text-xs text-on-surface-variant">
+            Showing {visibleSales.length === 0 ? 0 : Math.min(visibleSales.length, (currentPage - 1) * PAGE_SIZE + 1)}
+            {' - '}
+            {Math.min(visibleSales.length, currentPage * PAGE_SIZE)} of {visibleSales.length} {activeTab.toLowerCase()} record{visibleSales.length === 1 ? '' : 's'}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+              className="rounded-full border border-outline-variant bg-surface px-3 py-2 text-xs font-semibold text-on-surface-variant transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-surface-variant sm:px-4 sm:text-sm"
+            >
+              Prev
+            </button>
+            <span className="text-xs text-on-surface-variant">Page {currentPage} of {pageCount}</span>
+            <button
+              type="button"
+              onClick={() => setCurrentPage((prev) => Math.min(pageCount, prev + 1))}
+              disabled={currentPage === pageCount}
+              className="rounded-full border border-outline-variant bg-surface px-3 py-2 text-xs font-semibold text-on-surface-variant transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-surface-variant sm:px-4 sm:text-sm"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
@@ -350,13 +728,19 @@ export default function Dashboard() {
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={handleSaveEdit}
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-surface transition-colors hover:bg-primary-dark"
-              >
-                Save Changes
-              </button>
+              {isSupervisor ? (
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-surface transition-colors hover:bg-primary-dark"
+                >
+                  Save Changes
+                </button>
+              ) : (
+                <p className="text-sm text-on-surface-variant">
+                  Only Supervisors can update transactions.
+                </p>
+              )}
             </div>
           </div>
         </div>

@@ -22,12 +22,23 @@ from .audit import log_audit
 
 
 def get_request_user(request):
+    """
+    Resolve the acting user as the custom AuthUser instance so it can be stored on
+    the AuditTrail user FK. Falls back to request.user if it is already AuthUser.
+    """
+    from api.authentication.models import AuthUser
+
     user_header = request.headers.get('X-User-Email') or request.headers.get('X-User-Name')
     if user_header:
-        return user_header
+        user = AuthUser.objects.filter(email__iexact=user_header).first()
+        if user:
+            return user
+        return AuthUser.objects.filter(username__iexact=user_header).first()
+
     if hasattr(request, 'user') and request.user.is_authenticated:
-        return request.user.username
-    return 'Clerk'
+        return request.user
+
+    return None
 
 
 def refresh_material_aggregates(material):
@@ -120,6 +131,13 @@ def create_batch(request):
         return Response(results)
 
     try:
+        request_user = get_request_user(request)
+        if not request_user or request_user.role != 'Supervisor':
+            return Response(
+                {'detail': 'Only Supervisors can create new batches.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         data = request.data
         material_name = data.get('material_name', '').strip()
         batch_code = data.get('batch_code', '').strip()
@@ -164,15 +182,31 @@ def create_batch(request):
         if batch_created:
             refresh_material_aggregates(material)
 
-        # Log audit trail
-        log_audit(
-            entity_type='Batch',
-            entity_id=batch_code,
-            action='CREATE',
-            user=get_request_user(request),
-            description=f'Created batch {batch_code} for {material_name}',
-            entity_name=material_name
-        )
+            new_instance = {
+                'batch_code': batch.batch_code,
+                'material_id': material.material_id,
+                'material_name': material.material_name,
+                'leather_type': material.leather_type,
+                'tag': material.tag,
+                'description': material.description,
+                'size_sqft': float(batch.size_sqft),
+                'quantity': float(batch.quantity),
+                'sale_price': float(batch.sale_price),
+                'unit_price': float(batch.unit_price),
+                'company': batch.company,
+                'status': batch.status,
+            }
+
+            # Log audit trail
+            log_audit(
+                entity_type='Batch',
+                entity_id=batch_code,
+                action='CREATE',
+                new_instance=new_instance,
+                user=get_request_user(request),
+                description=f'Created batch {batch_code} for {material_name}',
+                entity_name=material_name
+            )
 
         return Response(
             {
@@ -313,7 +347,7 @@ def batch_detail(request, batch_code):
 def orders(request):
     """Handle GET (list orders) and POST (create order)."""
     if request.method == 'GET':
-        orders = Order.objects.order_by('-created_at')[:20]
+        orders = Order.objects.order_by('-created_at')
         serializer = OrderSerializer(orders, many=True)
         return Response(serializer.data)
     
@@ -380,11 +414,62 @@ def orders(request):
     return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
 
+@api_view(['DELETE'])
+def order_detail(request, order_id):
+    """Delete an order and its related order items."""
+    try:
+        order = get_object_or_404(Order, order_id=order_id)
+        old_instance = {
+            'order_id': order.order_id,
+            'customer': order.customer,
+            'fulfillment': order.fulfillment,
+            'delivery_address': order.delivery_address,
+            'order_description': order.order_description,
+            'scheduled_date': order.scheduled_date.isoformat() if order.scheduled_date else None,
+            'scheduled_time': order.scheduled_time.isoformat() if order.scheduled_time else None,
+            'payment_method': order.payment_method,
+            'total': float(order.total),
+            'item_count': order.item_count,
+            'status': order.status,
+            'created_at': order.created_at.isoformat() if order.created_at else None,
+            'items': [
+                {
+                    'material_name': item.material_name,
+                    'batch_code': item.batch_code,
+                    'unit': item.unit,
+                    'unit_price': float(item.unit_price),
+                    'qty': item.qty,
+                    'size_sqft': float(item.size_sqft),
+                    'custom_size': item.custom_size,
+                    'color': item.color,
+                }
+                for item in order.items.all()
+            ],
+        }
+
+        order.delete()
+
+        log_audit(
+            entity_type='Order',
+            entity_id=order_id,
+            action='DELETE',
+            old_instance=old_instance,
+            user=get_request_user(request),
+            description=f'Deleted order {order_id}',
+            entity_name=order.customer,
+        )
+        return Response({'message': 'Order deleted successfully'})
+    except Exception as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['GET'])
 def audit_trail_list(request):
     """Fetch audit trail entries with optional filtering."""
     entity_type = request.query_params.get('entity_type')
     entity_id = request.query_params.get('entity_id')
+    action = request.query_params.get('action')
+    role = request.query_params.get('role')
     limit = request.query_params.get('limit', 100)
 
     try:
@@ -392,13 +477,26 @@ def audit_trail_list(request):
     except (ValueError, TypeError):
         limit = 100
 
-    queryset = AuditTrail.objects.all()
+    queryset = AuditTrail.objects.select_related('user').all()
 
     if entity_type:
         queryset = queryset.filter(entity_type=entity_type)
     if entity_id:
         queryset = queryset.filter(entity_id=entity_id)
+    if action and action.upper() != 'ALL':
+        queryset = queryset.filter(action=action.upper())
 
-    audit_entries = queryset[:limit]
+    # Fetch from DB first (only applying entity-level filters).
+    # Cannot filter by role in queryset since role is a @property on AuditTrail
+    # (computed in Python, not a DB column).
+    audit_entries = list(queryset[:limit])
+
+    # Apply role filter in Python using the @property
+    if role and role.lower() != 'all':
+        audit_entries = [
+            e for e in audit_entries
+            if (e.role or '').lower() == role.lower()
+        ]
+
     serializer = AuditTrailSerializer(audit_entries, many=True)
     return Response(serializer.data)
