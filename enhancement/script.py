@@ -4,9 +4,9 @@ import clickhouse_connect
 from decimal import Decimal
 from dotenv import load_dotenv
 
-load_dotenv()  # reads .env file in the same folder
+load_dotenv()
 
-# ===== CONFIG =====
+# ---------- CONFIG ----------
 PG_CONFIG = {
     "host": os.getenv("PG_HOST"),
     "dbname": os.getenv("PG_DB"),
@@ -22,47 +22,62 @@ CH_CONFIG = {
     "password": os.getenv("CH_PASSWORD"),
 }
 
-TEST_LIMIT = 100
+TABLE_NAME = "order_items_flat"
 
-# ===== EXTRACT =====
-JOIN_QUERY = """
-    SELECT
-        oi.id                AS order_item_id,
-        o.order_id,
-        o.customer,
-        o.fulfillment,
-        o.delivery_address,
-        o.scheduled_date,
-        o.scheduled_time,
-        o.payment_method,
-        o.status,
-        o.created_at,
-        oi.material_name,
-        oi.batch_code,
-        oi.unit,
-        oi.unit_price,
-        oi.qty,
-        oi.size_sqft,
-        oi.custom_size,
-        oi.color
-    FROM api_orderitem oi
-    JOIN api_order o ON o.order_id = oi.order_id
-    ORDER BY o.created_at
-    LIMIT %s;
-"""
+# ---------- WATERMARK ----------
+def get_last_synced_id(client):
+    """Ask ClickHouse for the highest order_item_id already loaded.
+    Returns None if the table is empty (first run)."""
+    result = client.query(f"SELECT max(order_item_id) AS latest FROM {TABLE_NAME}")
+    latest = result.result_rows[0][0]
+    return latest  # None if table is empty
 
-def extract(limit=TEST_LIMIT):
-    conn = psycopg2.connect(**PG_CONFIG)    
+# ---------- EXTRACT ----------
+def build_query(since_id):
+    base_query = """
+        SELECT
+            oi.id                AS order_item_id,
+            o.order_id,
+            o.customer,
+            o.fulfillment,
+            o.delivery_address,
+            o.scheduled_date,
+            o.scheduled_time,
+            o.payment_method,
+            o.status,
+            o.created_at,
+            oi.material_name,
+            oi.batch_code,
+            oi.unit,
+            oi.unit_price,
+            oi.qty,
+            oi.size_sqft,
+            oi.custom_size,
+            oi.color
+        FROM api_orderitem oi
+        JOIN api_order o ON o.order_id = oi.order_id
+    """
+    if since_id is not None:
+        base_query += " WHERE oi.id > %s"
+        base_query += " ORDER BY oi.id;"
+        return base_query, (since_id,)
+    else:
+        base_query += " ORDER BY oi.id;"
+        return base_query, ()
+
+def extract(since_id):
+    conn = psycopg2.connect(**PG_CONFIG)
     cur = conn.cursor()
-    cur.execute(JOIN_QUERY, (limit,))
+    query, params = build_query(since_id)
+    cur.execute(query, params)
     columns = [desc[0] for desc in cur.description]
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    print(f"Extracted {len(rows)} rows from Postgres.")
+    print(f"Extracted {len(rows)} new rows from Postgres.")
     return columns, rows
 
-# ===== TRANSFORM (light cleaning only) =====
+# ---------- TRANSFORM (light cleaning only) ----------
 def transform(columns, rows):
     cleaned = []
     for row in rows:
@@ -77,9 +92,8 @@ def transform(columns, rows):
     print(f"Transformed {len(cleaned)} rows.")
     return cleaned
 
-# ===== LOAD =====
-def load(records):
-    client = clickhouse_connect.get_client(**CH_CONFIG)
+# ---------- LOAD ----------
+def load(client, records):
     column_order = [
         "order_item_id", "order_id", "customer", "fulfillment",
         "delivery_address", "scheduled_date", "scheduled_time",
@@ -88,15 +102,24 @@ def load(records):
         "custom_size", "color"
     ]
     data = [[record[col] for col in column_order] for record in records]
-    client.insert("order_items_flat", data, column_names=column_order)
+    client.insert(TABLE_NAME, data, column_names=column_order)
     print(f"Inserted {len(data)} rows into ClickHouse.")
 
-# ===== RUN =====
+# ---------- RUN ----------
 if __name__ == "__main__":
-    columns, rows = extract()
+    ch_client = clickhouse_connect.get_client(**CH_CONFIG)
+
+    last_synced_id = get_last_synced_id(ch_client)
+    if last_synced_id is not None:
+        print(f"Last synced order_item_id: {last_synced_id}. Pulling new rows only.")
+    else:
+        print("No prior data found. Performing full extraction.")
+
+    columns, rows = extract(last_synced_id)
+
     if not rows:
-        print("No rows returned — check your Postgres connection/query.")
+        print("No new rows to sync. Nothing inserted.")
     else:
         records = transform(columns, rows)
-        load(records)
-        print("Test batch complete.")
+        load(ch_client, records)
+        print("Sync complete.")
