@@ -3,6 +3,7 @@ import psycopg2
 import clickhouse_connect
 from decimal import Decimal
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -107,6 +108,8 @@ def load(client, records):
 
 # ---------- RUN ----------
 if __name__ == "__main__":
+    print(f"\n=== Extraction started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+
     ch_client = clickhouse_connect.get_client(**CH_CONFIG)
 
     last_synced_id = get_last_synced_id(ch_client)
@@ -123,3 +126,5 @@ if __name__ == "__main__":
         records = transform(columns, rows)
         load(ch_client, records)
         print("Sync complete.")
+
+    print(f"\n=== Extraction completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
