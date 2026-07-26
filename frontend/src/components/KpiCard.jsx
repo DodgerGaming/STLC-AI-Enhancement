@@ -1,4 +1,4 @@
-import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { ArrowUpRight, ArrowDownRight, Sparkles } from 'lucide-react'
 
 /**
  * @param {{
@@ -7,10 +7,21 @@ import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
  *  subtitle: string,
  *  icon: React.ComponentType,
  *  trend?: { direction: 'up' | 'down', value: string },
- *  tone?: 'default' | 'danger'
+ *  tone?: 'default' | 'danger',
+ *  aiInsight?: string | null,
+ *  aiInsightLoading?: boolean
  * }} props
  */
-export default function KpiCard({ label, value, subtitle, icon: Icon, trend, tone = 'default' }) {
+export default function KpiCard({
+  label,
+  value,
+  subtitle,
+  icon: Icon,
+  trend,
+  tone = 'default',
+  aiInsight,
+  aiInsightLoading = false,
+}) {
   const isDanger = tone === 'danger'
 
   return (
@@ -52,6 +63,17 @@ export default function KpiCard({ label, value, subtitle, icon: Icon, trend, ton
         )}
         <p className="text-xs text-on-surface-variant">{subtitle}</p>
       </div>
+
+      {(aiInsight || aiInsightLoading) && (
+        <div className="mt-2.5 flex items-start gap-1.5 border-t border-outline-variant/60 pt-2.5">
+          <Sparkles size={12} className="mt-0.5 shrink-0 text-primary" strokeWidth={2.2} />
+          {aiInsightLoading ? (
+            <div className="h-3 w-4/5 animate-pulse rounded-full bg-outline-variant/60" />
+          ) : (
+            <p className="text-xs leading-snug text-on-surface-variant">{aiInsight}</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
