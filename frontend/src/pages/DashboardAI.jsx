@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { Wallet, Layers, ShoppingCart, AlertTriangle, Download, Eye } from 'lucide-react'
 import KpiCard from '../components/KpiCard.jsx'
+import { AlertTriangle, Download, Wallet, Layers, ShoppingCart, Eye } from 'lucide-react'
 import StatusPill from '../components/StatusPill.jsx'
 import SalesByTypeBarChart from '../components/SalesByTypeBarChart.jsx'
 import RevenueShareDonutChart from '../components/RevenueShareDonutChart.jsx'
 import LowStockDetailsModal from '../components/LowStockDetailsModal.jsx'
+import AIInsightPanel from '../components/AIInsightPanel.jsx'
+import TopMovingItemsTable from '../components/TopMovingItemsTable.jsx'
+import AveragePeakHourChart from '../components/AveragePeakHourChart.jsx'
 import { SCRAP_UNIT } from '../data/mockLeather.js'
 import { fetchBatches, fetchMaterials, fetchOrders, deleteOrder } from '../data/apiLeather.js'
 import { formatPeso, formatNumber } from '../utils/format.js'
@@ -190,6 +193,117 @@ export default function Dashboard() {
       color: LEATHER_TYPE_COLORS[entry.type] ?? '#C76B6B',
     }))
   }, [salesByTypeData, dashboardKpis.totalRevenue])
+
+  // --- AI-enhanced dashboard additions -------------------------------------
+
+  const formatHourLabel = (hour) => {
+    const period = hour >= 12 ? 'PM' : 'AM'
+    const normalized = hour % 12 === 0 ? 12 : hour % 12
+    return `${normalized}${period}`
+  }
+
+  const itemRevenueTotals = useMemo(() => {
+    const totals = {}
+    filteredSales.forEach((sale) => {
+      ;(sale.raw?.items || []).forEach((item) => {
+        const name = item.material_name || 'Unknown'
+        const revenue = Number(item.unit_price ?? 0) * Number(item.qty ?? 0)
+        totals[name] = (totals[name] || 0) + revenue
+      })
+    })
+    return Object.entries(totals).map(([name, value]) => ({
+      name,
+      value: Math.round(value * 100) / 100,
+    }))
+  }, [filteredSales])
+
+  const fastMovingItems = useMemo(
+    () => [...itemRevenueTotals].sort((a, b) => b.value - a.value).slice(0, 3),
+    [itemRevenueTotals],
+  )
+
+  const slowMovingItems = useMemo(
+    () => [...itemRevenueTotals].sort((a, b) => a.value - b.value).slice(0, 3),
+    [itemRevenueTotals],
+  )
+
+  const peakHourData = useMemo(() => {
+    const buckets = {}
+    filteredSales.forEach((sale) => {
+      if (!sale.createdAt) return
+      const date = new Date(sale.createdAt)
+      if (Number.isNaN(date.getTime())) return
+      const hour = date.getHours()
+      const label = formatHourLabel(hour)
+      if (!buckets[label]) buckets[label] = { hour: label, qty: 0, _sortHour: hour }
+      buckets[label].qty += 1
+    })
+    return Object.values(buckets)
+      .sort((a, b) => a._sortHour - b._sortHour)
+      .map(({ _sortHour, ...rest }) => rest)
+  }, [filteredSales])
+
+  // NOTE: These insight strings are generated client-side from the same data
+  // already on this page. Once the Analytics Engine / AI backend is ready,
+  // swap these two useMemo blocks for the API response (insight text + trend)
+  // — the AIInsightPanel props (`insight`, `trend`, `loading`) already match
+  // that shape, so no markup changes will be needed downstream.
+  const executiveSummaryInsight = useMemo(() => {
+    if (isOrdersLoading) return null
+    if (salesByTypeData.length === 0) {
+      return selectedDate
+        ? `No sales recorded on ${selectedDate} yet.`
+        : 'No sales data available yet for this period.'
+    }
+    const topType = [...salesByTypeData].sort((a, b) => b.revenue - a.revenue)[0]
+    return `${topType.type} is the top revenue driver${selectedDate ? ` on ${selectedDate}` : ' this period'}, contributing ${formatPeso(topType.revenue)} of ${formatPeso(dashboardKpis.totalRevenue)} total revenue across ${formatNumber(dashboardKpis.totalOrders)} orders.`
+  }, [salesByTypeData, dashboardKpis, isOrdersLoading, selectedDate])
+
+  const stockInsight = useMemo(() => {
+    if (isOrdersLoading) return null
+    if (lowStockItems === 0) {
+      return 'All materials are currently within safe stock levels — no immediate restocking needed.'
+    }
+    const topLowStock = lowStockData[0]
+    return `${lowStockItems} material${lowStockItems === 1 ? '' : 's'} need restocking, led by ${topLowStock?.item} at ${formatNumber(topLowStock?.totalSize)} sqft needed.`
+  }, [lowStockItems, lowStockData, isOrdersLoading])
+
+  // Per-KPI compact insights — matches the wireframe's "KPI# + AI insight" boxes.
+  const revenueKpiInsight = useMemo(() => {
+    if (isOrdersLoading) return null
+    if (salesByTypeData.length === 0) return 'No revenue recorded for this period yet.'
+    const topType = [...salesByTypeData].sort((a, b) => b.revenue - a.revenue)[0]
+    const share = dashboardKpis.totalRevenue
+      ? Math.round((topType.revenue / dashboardKpis.totalRevenue) * 100)
+      : 0
+    return `${topType.type} drives ${share}% of total revenue this period.`
+  }, [salesByTypeData, dashboardKpis.totalRevenue, isOrdersLoading])
+
+  const leatherKpiInsight = useMemo(() => {
+    if (isOrdersLoading) return null
+    if (salesByTypeData.length === 0) return 'No leather movement recorded yet.'
+    const topByQty = [...salesByTypeData].sort((a, b) => b.qty - a.qty)[0]
+    return `${topByQty.type} is the most-used material at ${formatNumber(topByQty.qty)} ${topByQty.unit}.`
+  }, [salesByTypeData, isOrdersLoading])
+
+  const ordersKpiInsight = useMemo(() => {
+    if (isOrdersLoading) return null
+    if (filteredSales.length === 0) return 'No orders recorded for this period yet.'
+    const deliveryCount = filteredSales.filter(
+      (sale) => normalizeFulfillment(sale.fulfillment) === 'delivery',
+    ).length
+    const pickupCount = filteredSales.length - deliveryCount
+    return `${deliveryCount} delivery vs ${pickupCount} pick-up order${pickupCount === 1 ? '' : 's'} this period.`
+  }, [filteredSales, isOrdersLoading])
+
+  const lowStockKpiInsight = useMemo(() => {
+    if (isOrdersLoading) return null
+    if (lowStockItems === 0) return 'No materials currently need restocking.'
+    const topLowStock = lowStockData[0]
+    return `${topLowStock?.item} needs attention first — ${formatNumber(topLowStock?.totalSize)} sqft short.`
+  }, [lowStockItems, lowStockData, isOrdersLoading])
+
+  // --------------------------------------------------------------------------
 
   const visibleSales = useMemo(() => {
     const filtered = filteredSales.filter(filterBuyFulfillment)
@@ -410,13 +524,22 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <AIInsightPanel
+        title="AI Executive Summary"
+        insight={executiveSummaryInsight}
+        loading={isOrdersLoading}
+        variant="banner"
+      />
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Total Revenue"
           value={formatPeso(dashboardKpis.totalRevenue)}
           subtitle={selectedDate ? `Sales on ${selectedDate}` : 'All sales'}
           icon={Wallet}
           trend={{ direction: 'up', value: '+12.4%' }}
+          aiInsight={revenueKpiInsight}
+          aiInsightLoading={isOrdersLoading}
         />
         <KpiCard
           label="Leather Sold"
@@ -425,34 +548,56 @@ export default function Dashboard() {
           )} ${SCRAP_UNIT}`}
           subtitle={selectedDate ? `Filtered by ${selectedDate}` : 'Across all materials'}
           icon={Layers}
+          aiInsight={leatherKpiInsight}
+          aiInsightLoading={isOrdersLoading}
         />
         <KpiCard
           label="Total Orders"
           value={formatNumber(dashboardKpis.totalOrders)}
           subtitle={selectedDate ? `Orders on ${selectedDate}` : 'All orders'}
           icon={ShoppingCart}
+          aiInsight={ordersKpiInsight}
+          aiInsightLoading={isOrdersLoading}
         />
-        <div>
-          <button
-            type="button"
-            onClick={openLowStockDetails}
-            className="w-full text-left"
-            aria-label="Open stock need details"
-          >
-            <KpiCard
-              label="Low Stock Items"
-              value={formatNumber(lowStockItems)}
-              subtitle="Need restocking"
-              icon={Eye}
-              tone={lowStockItems > 0 ? 'danger' : 'default'}
-            />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={openLowStockDetails}
+          className="w-full text-left"
+          aria-label="Open stock need details"
+        >
+          <KpiCard
+            label="Low Stock Items"
+            value={formatNumber(lowStockItems)}
+            subtitle="Need restocking"
+            icon={Eye}
+            tone={lowStockItems > 0 ? 'danger' : 'default'}
+            aiInsight={lowStockKpiInsight}
+            aiInsightLoading={isOrdersLoading}
+          />
+        </button>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <TopMovingItemsTable
+          fastItems={fastMovingItems}
+          slowItems={slowMovingItems}
+          loading={isOrdersLoading}
+        />
+        <AveragePeakHourChart data={peakHourData} loading={isOrdersLoading} />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
         <SalesByTypeBarChart data={salesByTypeData} />
         <RevenueShareDonutChart data={revenueShareData} loading={isOrdersLoading} />
+      </div>
+
+      <div className="mt-4">
+        <AIInsightPanel
+          title="AI Summary"
+          insight={stockInsight}
+          loading={isOrdersLoading}
+          variant="compact"
+        />
       </div>
 
       <LowStockDetailsModal
