@@ -7,7 +7,7 @@ from datetime import datetime
 
 load_dotenv()
 
-# ---------- CONFIG ----------
+# ===== CONFIG =====
 PG_CONFIG = {
     "host": os.getenv("PG_HOST"),
     "dbname": os.getenv("PG_DB"),
@@ -25,7 +25,7 @@ CH_CONFIG = {
 
 TABLE_NAME = "order_items_flat"
 
-# ---------- WATERMARK ----------
+# ===== DUPLICATE-PREVENTION LOGIC =====
 def get_last_synced_id(client):
     """Ask ClickHouse for the highest order_item_id already loaded.
     Returns None if the table is empty (first run)."""
@@ -33,7 +33,7 @@ def get_last_synced_id(client):
     latest = result.result_rows[0][0]
     return latest  # None if table is empty
 
-# ---------- EXTRACT ----------
+# ===== EXTRACT =====
 def build_query(since_id):
     base_query = """
         SELECT
@@ -78,7 +78,7 @@ def extract(since_id):
     print(f"Extracted {len(rows)} new rows from Postgres.")
     return columns, rows
 
-# ---------- TRANSFORM (light cleaning only) ----------
+# ===== TRANSFORM =====
 def transform(columns, rows):
     cleaned = []
     for row in rows:
@@ -93,7 +93,7 @@ def transform(columns, rows):
     print(f"Transformed {len(cleaned)} rows.")
     return cleaned
 
-# ---------- LOAD ----------
+# ===== LOAD =====
 def load(client, records):
     column_order = [
         "order_item_id", "order_id", "customer", "fulfillment",
@@ -106,7 +106,7 @@ def load(client, records):
     client.insert(TABLE_NAME, data, column_names=column_order)
     print(f"Inserted {len(data)} rows into ClickHouse.")
 
-# ---------- RUN ----------
+# ===== RUN =====
 if __name__ == "__main__":
     print(f"\n=== Extraction started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
 
