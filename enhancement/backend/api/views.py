@@ -18,6 +18,14 @@ from .services.db_queries import (
     get_batches_for_material_raw,
     get_material_detail_raw,
 )
+
+from .services.analytics_queries import (
+    get_best_selling_materials_raw,
+    get_peak_day_of_week_raw,
+    get_peak_hour_of_day_raw,
+    get_daily_sales_trend_raw,
+)
+
 from .audit import log_audit
 
 
@@ -500,3 +508,40 @@ def audit_trail_list(request):
 
     serializer = AuditTrailSerializer(audit_entries, many=True)
     return Response(serializer.data)
+
+@api_view(['GET'])
+def best_selling_materials(request):
+    try:
+        days = request.query_params.get('days')
+        days = int(days) if days else None
+        data = get_best_selling_materials_raw(days=days)
+        return Response(data)
+    except Exception as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def peak_day_of_week(request):
+    try:
+        data = get_peak_day_of_week_raw()
+        return Response(data)
+    except Exception as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def peak_hour_of_day(request):
+    try:
+        data = get_peak_hour_of_day_raw()
+        return Response(data)
+    except Exception as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def daily_sales_trend(request):
+    try:
+        data = get_daily_sales_trend_raw()
+        return Response(data)
+    except Exception as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

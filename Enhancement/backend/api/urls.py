@@ -12,5 +12,10 @@ urlpatterns = [
     path('orders/', views.orders, name='orders'),
     path('orders/<str:order_id>/', views.order_detail, name='order-detail'),
     path('audit-trail/', views.audit_trail_list, name='audit-trail-list'),
+    path('analytics/best-sellers/', views.best_selling_materials, name='best-selling-materials'),
+    path('analytics/peak-day/', views.peak_day_of_week, name='peak-day-of-week'),
+    path('analytics/peak-hour/', views.peak_hour_of_day, name='peak-hour-of-day'),
+    path('analytics/trend/', views.daily_sales_trend, name='daily-sales-trend'),
     path('authentication/', include('api.authentication.urls')),
+    
 ]
