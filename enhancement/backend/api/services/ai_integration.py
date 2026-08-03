@@ -1,0 +1,116 @@
+"""
+api/services/ai_insights.py
+
+Generates short, descriptive natural-language insights from analytics data
+using Groq. This is DESCRIPTIVE only (summarizes what the data shows) —
+not predictive/ML.
+
+Usage:
+    from api.services.ai_insights import generate_insight
+    insight_text = generate_insight(data, insight_type="best-sellers")
+"""
+
+import os
+import logging
+from groq import Groq
+
+logger = logging.getLogger(__name__)
+
+# --- Config ---------------------------------------------------------------
+
+GROQ_MODEL = "llama-3.1-8b-instant"
+MAX_INSIGHT_WORDS = 10  # hard cap communicated to the model via prompt
+FALLBACK_TEXT = "Insight unavailable right now."
+
+_client = None  # lazy-initialized so a missing key doesn't crash import
+
+
+def _get_client():
+    """Lazily create the Groq client so import-time doesn't require the key."""
+    global _client
+    if _client is None:
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY is not set in the environment.")
+        _client = Groq(api_key=api_key)
+    return _client
+
+
+# --- Prompt templates per insight_type -------------------------------------
+# Each maps to one of the 4 existing endpoints. Keep prompts short/specific —
+# the model only needs to describe, not analyze deeply.
+
+_PROMPT_TEMPLATES = {
+    "best-sellers": (
+        "You are a retail analytics assistant. Given this best-sellers data "
+        "(product names and quantities sold), write ONE short sentence, "
+        "max {max_words} words, highlighting the top performer. "
+        "No preamble, no markdown, just the sentence.\n\nData: {data}"
+    ),
+    "peak-day": (
+        "You are a retail analytics assistant. Given this data on sales by "
+        "day of week, write ONE short sentence, max {max_words} words, "
+        "naming the peak day. No preamble, no markdown, just the sentence.\n\n"
+        "Data: {data}"
+    ),
+    "peak-hour": (
+        "You are a retail analytics assistant. Given this data on sales by "
+        "hour of day, write ONE short sentence, max {max_words} words, "
+        "naming the peak hour. No preamble, no markdown, just the sentence.\n\n"
+        "Data: {data}"
+    ),
+    "trend": (
+        "You are a retail analytics assistant. Given this sales trend data "
+        "over time, write ONE short sentence, max {max_words} words, "
+        "describing the overall direction (up/down/flat). No preamble, "
+        "no markdown, just the sentence.\n\nData: {data}"
+    ),
+}
+
+_DEFAULT_TEMPLATE = (
+    "You are a retail analytics assistant. Given this data, write ONE short "
+    "sentence, max {max_words} words, summarizing the key takeaway. "
+    "No preamble, no markdown, just the sentence.\n\nData: {data}"
+)
+
+
+def generate_insight(data, insight_type: str) -> str:
+    """
+    Turn analytics data into a short natural-language insight using Groq.
+
+    Args:
+        data: The list/dict of analytics results (e.g. from ClickHouse query).
+        insight_type: One of "best-sellers", "peak-day", "peak-hour", "trend".
+                       Unrecognized types fall back to a generic prompt.
+
+    Returns:
+        A short insight string. On ANY failure (missing key, network error,
+        API error, timeout), returns FALLBACK_TEXT instead of raising —
+        callers should never have to handle exceptions from this function.
+    """
+
+    if not data:
+        return "No data available for this period."
+
+    try:
+        client = _get_client()
+
+        template = _PROMPT_TEMPLATES.get(insight_type, _DEFAULT_TEMPLATE)
+        prompt = template.format(max_words=MAX_INSIGHT_WORDS, data=data)
+
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=40,       # short output only — keeps latency low
+            temperature=0.3,     # low temp: consistent, factual, not flowery
+            timeout=8,           # fail fast rather than hang a request/demo
+        )
+
+        text = response.choices[0].message.content.strip()
+        return text if text else FALLBACK_TEXT
+
+    except Exception as e:
+        # Covers: missing API key, network issues, rate limits, malformed
+        # data, Groq API errors, timeouts — all degrade gracefully.
+        logger.warning(f"generate_insight failed for type='{insight_type}': {e}")
+        return FALLBACK_TEXT
