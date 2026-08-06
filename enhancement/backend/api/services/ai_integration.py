@@ -12,7 +12,16 @@ Usage:
 
 import os
 import logging
-from groq import Groq
+from pathlib import Path
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
+try:
+    from groq import Groq
+except ImportError:  # pragma: no cover - exercised when dependency is absent
+    Groq = None
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +38,32 @@ def _get_client():
     """Lazily create the Groq client so import-time doesn't require the key."""
     global _client
     if _client is None:
+        if Groq is None:
+            raise RuntimeError("The 'groq' package is not installed.")
         api_key = os.environ.get("GROQ_API_KEY")
+        # If env var not set, try loading backend/.env (common in dev)
+        if not api_key and load_dotenv is not None:
+            try:
+                backend_dir = Path(__file__).resolve().parents[2]
+                dotenv_path = backend_dir / '.env'
+                if dotenv_path.exists():
+                    load_dotenv(str(dotenv_path))
+                    api_key = os.environ.get("GROQ_API_KEY")
+            except Exception:
+                pass
+
+        # If still not set, try reading from Django settings (if available)
+        if not api_key:
+            try:
+                from django.conf import settings as _dj_settings
+
+                api_key = getattr(_dj_settings, 'GROQ_API_KEY', None)
+            except Exception:
+                api_key = None
+
         if not api_key:
             raise RuntimeError("GROQ_API_KEY is not set in the environment.")
+
         _client = Groq(api_key=api_key)
     return _client
 

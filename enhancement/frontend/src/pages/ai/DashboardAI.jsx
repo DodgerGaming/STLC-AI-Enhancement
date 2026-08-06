@@ -8,22 +8,8 @@ import KpiCardAI from '../../components/ai/KpiCardAI.jsx'
 import AIInsightPanel from '../../components/ai/AIInsightPanel.jsx'
 import TopMovingItemsTable from '../../components/ai/TopMovingItemsTable.jsx'
 import AveragePeakHourChart from '../../components/ai/AveragePeakHourChart.jsx'
-import {
-  recentSales,
-  salesByTypeData,
-  revenueShareData,
-  dashboardKpis,
-  materials,
-  hideBatches,
-  SCRAP_UNIT,
-} from '../../data/mockLeather.js'
+import { getJson } from '../../utils/api.js'
 import { formatPeso, formatNumber } from '../../utils/format.js'
-
-// NOTE: This page reads directly from src/data/mockLeather.js (already in
-// this project) instead of calling the Django API. Once the backend is
-// ready, swap the static imports below for real fetch() calls from
-// data/apiLeather.js — the derivations and JSX don't need to change,
-// since they already operate on the same shapes.
 
 export default function DashboardAI() {
   const [activeTab, setActiveTab] = useState('Delivery')
@@ -31,34 +17,132 @@ export default function DashboardAI() {
   const [isLowStockDetailsOpen, setIsLowStockDetailsOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [orders, setOrders] = useState([])
+  const [bestSellers, setBestSellers] = useState([])
+  const [salesByTypeData, setSalesByTypeData] = useState([])
+  const [revenueShareData, setRevenueShareData] = useState([])
+  const [peakHourData, setPeakHourData] = useState([])
+  const [dashboardKpis, setDashboardKpis] = useState({
+    totalRevenue: 0,
+    leatherSoldSqft: 0,
+    leatherSoldKg: 0,
+    totalOrders: 0,
+    lowStockItems: 0,
+  })
+  const [analyticsInsights, setAnalyticsInsights] = useState({
+    bestSellers: '',
+    peakDay: '',
+    peakHour: '',
+    trend: '',
+  })
+  const SCRAP_UNIT = 'kg'
   const PAGE_SIZE = 10
 
-  // Brief simulated load so the skeleton/loading states are visible, same
-  // as they will be once real network calls are wired in.
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 500)
-    return () => clearTimeout(timer)
+    async function loadAnalytics() {
+      setIsLoading(true)
+      setError('')
+
+      try {
+        const [bestRes, peakDayRes, peakHourRes, trendRes, ordersRes] = await Promise.all([
+          getJson('/api/analytics/best-sellers/'),
+          getJson('/api/analytics/peak-day/'),
+          getJson('/api/analytics/peak-hour/'),
+          getJson('/api/analytics/trend/'),
+          getJson('/api/orders/'),
+        ])
+
+        const bestSellers = bestRes.data ?? []
+        const totalRevenue = Array.isArray(ordersRes)
+          ? ordersRes.reduce((sum, order) => sum + Number(order.total || 0), 0)
+          : 0
+        const leatherTotals = Array.isArray(ordersRes)
+          ? ordersRes.reduce(
+              (acc, order) => {
+                const items = Array.isArray(order.items) ? order.items : []
+                items.forEach((item) => {
+                  const qty = Number(item.size_sqft ?? item.qty ?? 0) || 0
+                  const type = String(item.material_name || '').toLowerCase()
+                  if (type.includes('scrap')) {
+                    acc.leatherSoldKg += qty
+                  } else {
+                    acc.leatherSoldSqft += qty
+                  }
+                })
+                return acc
+              },
+              { leatherSoldSqft: 0, leatherSoldKg: 0 },
+            )
+          : { leatherSoldSqft: 0, leatherSoldKg: 0 }
+        const revenueShare = bestSellers.map((item) => ({
+          type: item.material_name,
+          value: totalRevenue ? Math.round((Number(item.total_revenue || 0) / totalRevenue) * 100) : 0,
+          color: '#8B2525',
+        }))
+        const salesByType = bestSellers.map((item) => ({
+          type: item.material_name,
+          qty: Number(item.total_qty || 0),
+          unit: 'sqft',
+        }))
+
+        setBestSellers(bestSellers)
+        setSalesByTypeData(salesByType)
+        setRevenueShareData(revenueShare)
+        setDashboardKpis({
+          totalRevenue,
+          leatherSoldSqft: leatherTotals.leatherSoldSqft,
+          leatherSoldKg: leatherTotals.leatherSoldKg,
+          totalOrders: Array.isArray(ordersRes) ? ordersRes.length : 0,
+          lowStockItems: 0,
+        })
+        setPeakHourData(
+          (peakHourRes.data ?? []).map((item) => ({
+            hour: item.hour_of_day,
+            qty: Number(item.total_qty || 0),
+          })),
+        )
+        setAnalyticsInsights({
+          bestSellers: bestRes.insight ?? '',
+          peakDay: peakDayRes.insight ?? '',
+          peakHour: peakHourRes.insight ?? '',
+          trend: trendRes.insight ?? '',
+        })
+        setOrders(Array.isArray(ordersRes) ? ordersRes : [])
+      } catch (err) {
+        // TEMP DEBUG: log the full error so we can see the real cause —
+        // 404 = wrong URL, 500 = backend/ClickHouse crash, TypeError = CORS/network block
+        console.error('[DashboardAI] analytics fetch failed:', err)
+        setError(err.message || 'Failed to load analytics data.')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadAnalytics()
   }, [])
 
-  const materialTypeMap = useMemo(() => {
-    const map = {}
-    materials.forEach((m) => {
-      map[m.material_name] = m.leather_type
-    })
-    return map
-  }, [])
+  const normalizeFulfillment = (value) => {
+    const normalized = String(value || '').trim().toLowerCase()
+    if (normalized.includes('pick')) return 'Pickup'
+    if (normalized.includes('deliv')) return 'Delivery'
+    return value || 'Delivery'
+  }
 
   const salesWithDateKey = useMemo(
     () =>
-      recentSales.map((sale) => {
-        const parsed = new Date(sale.createdAt)
+      orders.map((sale) => {
+        const parsed = new Date(sale.created_at)
         return {
           ...sale,
+          fulfillment: normalizeFulfillment(sale.fulfillment),
+          total: Number(sale.total || 0),
+          status: sale.status || 'Pending',
           dateKey: Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10),
           hour: Number.isNaN(parsed.getTime()) ? null : parsed.getHours(),
         }
       }),
-    [],
+    [orders],
   )
 
   const filteredSales = useMemo(() => {
@@ -70,7 +154,7 @@ export default function DashboardAI() {
     const wantPickup = activeTab === 'Pick-up'
     return [...filteredSales]
       .filter((sale) => (wantPickup ? sale.fulfillment === 'Pickup' : sale.fulfillment === 'Delivery'))
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }, [filteredSales, activeTab])
 
   const pageCount = Math.max(1, Math.ceil(visibleSales.length / PAGE_SIZE))
@@ -83,14 +167,11 @@ export default function DashboardAI() {
     if (currentPage > pageCount) setCurrentPage(pageCount)
   }, [currentPage, pageCount])
 
-  // --- Top / slow moving items (by revenue, from recentSales) --------------
-  const itemRevenueTotals = useMemo(() => {
-    const totals = {}
-    filteredSales.forEach((sale) => {
-      totals[sale.material] = (totals[sale.material] || 0) + Number(sale.total || 0)
-    })
-    return Object.entries(totals).map(([name, value]) => ({ name, value }))
-  }, [filteredSales])
+  // --- Top / slow moving items (by revenue, from best sellers) --------------
+  const itemRevenueTotals = useMemo(
+    () => bestSellers.map((item) => ({ name: item.material_name, value: Number(item.total_revenue || 0) })),
+    [bestSellers],
+  )
 
   const fastMovingItems = useMemo(
     () => [...itemRevenueTotals].sort((a, b) => b.value - a.value).slice(0, 3),
@@ -101,50 +182,16 @@ export default function DashboardAI() {
     [itemRevenueTotals],
   )
 
-  // --- Average peak hour (from recentSales.createdAt) -----------------------
+  // --- Average peak hour (from backend analytics) -------------------------
   const formatHourLabel = (hour) => {
     const period = hour >= 12 ? 'PM' : 'AM'
     const normalized = hour % 12 === 0 ? 12 : hour % 12
     return `${normalized}${period}`
   }
 
-  const peakHourData = useMemo(() => {
-    const buckets = {}
-    filteredSales.forEach((sale) => {
-      if (sale.hour === null) return
-      const label = formatHourLabel(sale.hour)
-      if (!buckets[label]) buckets[label] = { hour: label, qty: 0, _sortHour: sale.hour }
-      buckets[label].qty += 1
-    })
-    return Object.values(buckets)
-      .sort((a, b) => a._sortHour - b._sortHour)
-      .map(({ _sortHour, ...rest }) => rest)
-  }, [filteredSales])
+  const lowStockBatches = useMemo(() => [], [])
 
-  // --- Low stock (from hideBatches) -----------------------------------------
-  const lowStockBatches = useMemo(
-    () =>
-      hideBatches
-        .filter((batch) => batch.status === 'Depleted')
-        .map((batch) => ({
-          batchCode: batch.batch_code,
-          materialName: batch.material_name,
-          leatherType: batch.leather_type,
-          sizeSqft: batch.size_sqft,
-          quantity: batch.quantity,
-          status: batch.status,
-        })),
-    [],
-  )
-
-  const lowStockData = useMemo(() => {
-    const grouped = {}
-    lowStockBatches.forEach((batch) => {
-      if (!grouped[batch.materialName]) grouped[batch.materialName] = { item: batch.materialName, totalSize: 0 }
-      grouped[batch.materialName].totalSize += batch.sizeSqft * batch.quantity
-    })
-    return Object.values(grouped).sort((a, b) => b.totalSize - a.totalSize)
-  }, [lowStockBatches])
+  const lowStockData = useMemo(() => [], [lowStockBatches])
 
   const openLowStockDetails = () => setIsLowStockDetailsOpen(true)
   const closeLowStockDetails = () => setIsLowStockDetailsOpen(false)
@@ -152,22 +199,39 @@ export default function DashboardAI() {
   // --- AI insight text (derived, not yet a real model call) -----------------
   const revenueByType = useMemo(() => {
     const totals = {}
-    filteredSales.forEach((sale) => {
-      const type = materialTypeMap[sale.material] || 'Cowhide'
-      totals[type] = (totals[type] || 0) + Number(sale.total || 0)
+    salesByTypeData.forEach((entry) => {
+      totals[entry.type] = (totals[entry.type] || 0) + Number(entry.qty || 0)
     })
     return totals
-  }, [filteredSales, materialTypeMap])
+  }, [salesByTypeData])
 
   const executiveSummaryInsight = useMemo(() => {
     if (isLoading) return null
+    if (analyticsInsights.bestSellers) return analyticsInsights.bestSellers
+
     const entries = Object.entries(revenueByType)
     if (entries.length === 0) {
       return selectedDate ? `No sales recorded on ${selectedDate} yet.` : 'No sales data available yet.'
     }
+
     const [topType, topRevenue] = entries.sort((a, b) => b[1] - a[1])[0]
-    return `${topType} is the top revenue driver${selectedDate ? ` on ${selectedDate}` : ' this period'}, contributing ${formatPeso(topRevenue)} of ${formatPeso(dashboardKpis.totalRevenue)} total revenue.`
-  }, [revenueByType, isLoading, selectedDate])
+    // Estimate total cost from orders (sum of unit_price * qty) so we can show a basic margin
+    const totalCost = Array.isArray(orders)
+      ? orders.reduce((acc, order) => {
+          const items = Array.isArray(order.items) ? order.items : []
+          return (
+            acc +
+            items.reduce((s, it) => s + (Number(it.unit_price || 0) * Number(it.qty || 0) || 0), 0)
+          )
+        }, 0)
+      : 0
+
+    const costPart = totalCost ? ` Estimated cost: ${formatPeso(totalCost)}.` : ''
+
+    return `${topType} is the top revenue driver${selectedDate ? ` on ${selectedDate}` : ' this period'}, contributing ${formatPeso(
+      topRevenue,
+    )} of ${formatPeso(dashboardKpis.totalRevenue)} total revenue.${costPart}`
+  }, [analyticsInsights.bestSellers, dashboardKpis.totalRevenue, isLoading, revenueByType, selectedDate, orders])
 
   const stockInsight = useMemo(() => {
     if (isLoading) return null
@@ -190,14 +254,14 @@ export default function DashboardAI() {
     if (isLoading) return null
     const top = [...salesByTypeData].sort((a, b) => b.qty - a.qty)[0]
     return top ? `${top.type} is the most-sold type` : 'No leather sold yet'
-  }, [isLoading])
+  }, [isLoading, salesByTypeData])
 
   const ordersKpiInsight = useMemo(() => {
     if (isLoading) return null
-    const deliveryCount = filteredSales.filter((s) => s.fulfillment === 'Delivery').length
-    const pickupCount = filteredSales.filter((s) => s.fulfillment === 'Pickup').length
-    return filteredSales.length > 0 ? `${deliveryCount} delivery, ${pickupCount} pick-up` : 'No orders yet'
-  }, [filteredSales, isLoading])
+    const deliveryCount = orders.filter((s) => String(s.fulfillment || '').toLowerCase().includes('deliv')).length
+    const pickupCount = orders.filter((s) => String(s.fulfillment || '').toLowerCase().includes('pick')).length
+    return orders.length > 0 ? `${deliveryCount} delivery, ${pickupCount} pick-up` : 'No orders yet'
+  }, [isLoading, orders])
 
   const lowStockKpiInsight = useMemo(() => {
     if (isLoading) return null
@@ -270,6 +334,13 @@ export default function DashboardAI() {
         </div>
       </div>
 
+      {error && (
+        <div className="mb-4 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
+          <p className="font-semibold">Failed to load analytics data</p>
+          <p className="mt-0.5 text-xs">{error} — check browser console (F12) for the full response.</p>
+        </div>
+      )}
+
       <AIInsightPanel
         title="AI Executive Summary"
         insight={executiveSummaryInsight}
@@ -281,7 +352,7 @@ export default function DashboardAI() {
         <KpiCardAI
           label="Total Revenue"
           value={formatPeso(dashboardKpis.totalRevenue)}
-          subtitle="All sales (demo data)"
+          subtitle="All sales"
           icon={Wallet}
           trend={{ direction: 'up', value: '+12.4%' }}
           aiInsight={revenueKpiInsight}
@@ -298,7 +369,7 @@ export default function DashboardAI() {
         <KpiCardAI
           label="Total Orders"
           value={formatNumber(dashboardKpis.totalOrders)}
-          subtitle="Completed orders (demo data)"
+          subtitle="Backend orders"
           icon={ShoppingCart}
           aiInsight={ordersKpiInsight}
           aiInsightLoading={isLoading}
@@ -330,7 +401,7 @@ export default function DashboardAI() {
         <AIInsightPanel title="AI Summary" insight={stockInsight} loading={isLoading} variant="compact" />
       </div>
 
-      <LowStockDetailsModal open={isLowStockDetailsOpen} onClose={closeLowStockDetails} data={lowStockBatches} />
+      <LowStockDetailsModal open={isLowStockDetailsOpen} onClose={closeLowStockDetails} data={[]} />
 
       <div className="mt-6 overflow-hidden rounded-xl border border-outline-variant bg-surface shadow-card">
         <div className="flex flex-col gap-3 border-b border-outline-variant px-4 py-4 sm:gap-4 sm:px-5 md:flex-row md:items-center md:justify-between">
@@ -365,8 +436,7 @@ export default function DashboardAI() {
               <tr className="bg-surface-variant/60 font-semibold text-on-surface-variant">
                 <th className="whitespace-nowrap px-3 py-3 sm:px-5">Order ID</th>
                 <th className="whitespace-nowrap px-3 py-3 sm:px-5">Customer</th>
-                <th className="whitespace-nowrap px-3 py-3 sm:px-5">Material</th>
-                <th className="whitespace-nowrap px-3 py-3 sm:px-5">Qty</th>
+                <th className="whitespace-nowrap px-3 py-3 sm:px-5">Fulfillment</th>
                 <th className="whitespace-nowrap px-3 py-3 sm:px-5">Total</th>
                 <th className="whitespace-nowrap px-3 py-3 sm:px-5">Status</th>
               </tr>
@@ -376,8 +446,7 @@ export default function DashboardAI() {
                 <tr key={sale.order_id} className="border-b border-outline-variant last:border-0">
                   <td className="whitespace-nowrap px-3 py-3 font-semibold text-on-surface sm:px-5">{sale.order_id}</td>
                   <td className="whitespace-nowrap px-3 py-3 text-on-surface-variant sm:px-5">{sale.customer}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-on-surface-variant sm:px-5">{sale.material}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-on-surface-variant sm:px-5">{sale.qty}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-on-surface-variant sm:px-5">{sale.fulfillment}</td>
                   <td className="whitespace-nowrap px-3 py-3 font-semibold text-on-surface sm:px-5">{formatPeso(sale.total)}</td>
                   <td className="whitespace-nowrap px-3 py-3 sm:px-5">
                     <StatusPill status={sale.status} />
@@ -386,7 +455,7 @@ export default function DashboardAI() {
               ))}
               {visibleSales.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-8 text-center text-xs text-on-surface-variant sm:px-5 sm:text-sm">
+                  <td colSpan={5} className="px-3 py-8 text-center text-xs text-on-surface-variant sm:px-5 sm:text-sm">
                     No {activeTab.toLowerCase()} transactions found.
                   </td>
                 </tr>
