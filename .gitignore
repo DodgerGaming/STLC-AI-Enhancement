@@ -6,3 +6,5 @@ node_modules/
 frontend/dist/
 .tmp_*
 *logs/
+.env
+analytics-venv/

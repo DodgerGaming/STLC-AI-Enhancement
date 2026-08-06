@@ -172,7 +172,6 @@ def get_daily_sales_trend_raw():
             agg[day]['total_revenue'] += float((qty or 0) * float(unit_price or 0))
 
         items = sorted([(d, v['total_qty'], v['total_revenue']) for d, v in agg.items()], key=lambda x: x[0])
-        import pandas as pd
         df = pd.DataFrame([{'sale_date': d, 'total_qty': q, 'total_revenue': r} for d, q, r in items])
         if df.empty:
             return []
