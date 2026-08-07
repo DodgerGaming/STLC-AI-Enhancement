@@ -30,13 +30,36 @@ from .services.analytics_queries import (
 from .audit import log_audit
 from .services.ai_integration import generate_insight
 
-SEED_INSIGHTS = {
-    "What's been trending in leather sales lately?": "Leather handbag sales rose sharply during the holiday week, led by tote styles.",
-    'Which material is generating the most revenue?': 'Cowhide remains the strongest revenue driver, with the highest contribution across recent orders.',
-    'When do we see the most orders come in?': 'Most orders arrive in the late afternoon, especially around the middle of the week.',
-    'How are accessory sales doing?': 'Accessory sales are steady, with small leather goods showing consistent demand.',
-    "What's changed compared to last quarter?": 'Compared with last quarter, order volume is up and premium leather categories are performing stronger.',
-}
+
+def classify_question_and_get_insight(question: str) -> tuple:
+    """
+    Classify a user question and fetch appropriate analytics data,
+    then generate an AI insight.
+    
+    Returns: (insight_text, insight_type) where insight_type is one of
+    'best-sellers', 'peak-day', 'peak-hour', 'trend'
+    """
+    q_lower = question.lower()
+    
+    # Classify based on keywords
+    if any(keyword in q_lower for keyword in ['trending', 'trend', 'sales lately', 'recently', 'changed', 'last quarter', 'compared']):
+        data = get_daily_sales_trend_raw()
+        return generate_insight(data, 'trend'), 'trend'
+    
+    if any(keyword in q_lower for keyword in ['revenue', 'revenue driver', 'generating', 'best seller', 'top material', 'accessory sales', 'accessory']):
+        data = get_best_selling_materials_raw()
+        return generate_insight(data, 'best-sellers'), 'best-sellers'
+    
+    if any(keyword in q_lower for keyword in ['when', 'peak', 'most orders', 'hour', 'afternoon', 'time of day']):
+        data = get_peak_hour_of_day_raw()
+        return generate_insight(data, 'peak-hour'), 'peak-hour'
+    
+    if any(keyword in q_lower for keyword in ['day of week', 'day we see', 'which day', 'busiest day', 'peak day']):
+        data = get_peak_day_of_week_raw()
+        return generate_insight(data, 'peak-day'), 'peak-day'
+    
+    # Fallback: return a generic message
+    return "I'm not sure how to answer that. Try asking about trending sales, top materials, peak hours, or peak days.", 'unknown'
 
 
 def get_request_user(request):
@@ -85,19 +108,20 @@ def semantic_search_insights(request):
             question = str(question or '')
 
         normalized_question = question.strip()
-        matched_text = SEED_INSIGHTS.get(normalized_question)
-
-        if matched_text:
+        if not normalized_question:
             return Response({
                 'query': normalized_question,
-                'results': [
-                    {'text': matched_text, 'distance': 0.12},
-                ],
+                'results': [],
             }, status=status.HTTP_200_OK)
+
+        # Generate AI insight based on the question
+        insight_text, insight_type = classify_question_and_get_insight(normalized_question)
 
         return Response({
             'query': normalized_question,
-            'results': [],
+            'results': [
+                {'text': insight_text, 'distance': 0.0, 'type': insight_type},
+            ],
         }, status=status.HTTP_200_OK)
     except Exception as exc:
         logger.exception('Semantic insight search failed')
