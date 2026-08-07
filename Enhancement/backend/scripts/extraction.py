@@ -4,8 +4,14 @@ import clickhouse_connect
 from decimal import Decimal
 from dotenv import load_dotenv
 from datetime import datetime
+import time
+from pathlib import Path
 
-load_dotenv()
+env_path = Path(__file__).resolve().parent.parent / ".env"
+print("Loading .env from:", env_path)
+
+load_dotenv(env_path)
+print("PG_PORT =", os.getenv("PG_PORT"))
 
 # ===== CONFIG =====
 PG_CONFIG = {
@@ -102,12 +108,22 @@ def load(client, records):
         "batch_code", "unit", "unit_price", "qty", "size_sqft",
         "custom_size", "color"
     ]
-    data = [[record[col] for col in column_order] for record in records]
-    client.insert(TABLE_NAME, data, column_names=column_order)
-    print(f"Inserted {len(data)} rows into ClickHouse.")
 
+    data = [[record[col] for col in column_order] for record in records]
+
+    load_start = time.perf_counter()
+
+    client.insert(TABLE_NAME, data, column_names=column_order)
+
+    load_end = time.perf_counter()
+    load_duration = load_end - load_start
+
+    print(f"Inserted {len(data)} rows into ClickHouse.")
+    print(f"ClickHouse Load Duration: {load_duration:.2f} seconds")
+    
 # ===== RUN =====
 if __name__ == "__main__":
+    start_time = time.perf_counter()
     print(f"\n=== Extraction started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
 
     ch_client = clickhouse_connect.get_client(**CH_CONFIG)
@@ -128,3 +144,9 @@ if __name__ == "__main__":
         print("Sync complete.")
 
     print(f"\n=== Extraction completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
+
+    end_time = time.perf_counter()
+    duration = end_time - start_time
+
+    print(f"Records Extracted: {len(rows)}")
+    print(f"Duration: {duration:.2f} seconds")

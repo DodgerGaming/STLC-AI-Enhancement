@@ -11,6 +11,7 @@ Usage:
 """
 
 import os
+import time
 import logging
 from pathlib import Path
 try:
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 # --- Config ---------------------------------------------------------------
 
 GROQ_MODEL = "llama-3.1-8b-instant"
-MAX_INSIGHT_WORDS = 10  # hard cap communicated to the model via prompt
+MAX_INSIGHT_WORDS = 20  # hard cap communicated to the model via prompt
 FALLBACK_TEXT = "Insight unavailable right now."
 
 _client = None  # lazy-initialized so a missing key doesn't crash import
@@ -75,9 +76,9 @@ def _get_client():
 _PROMPT_TEMPLATES = {
     "best-sellers": (
         "You are a retail analytics assistant. Given this best-sellers data "
-        "(product names and quantities sold), write ONE short sentence, "
-        "max {max_words} words, highlighting the top performer. "
-        "No preamble, no markdown, just the sentence.\n\nData: {data}"
+        "(product names and quantities sold), write a concise summary of the top "
+        "performer, the relative revenue contribution, and any meaningful trend. "
+        "Use no more than {max_words} words. No preamble, no markdown, just the summary.\n\nData: {data}"
     ),
     "peak-day": (
         "You are a retail analytics assistant. Given this data on sales by "
@@ -146,3 +147,40 @@ def generate_insight(data, insight_type: str) -> str:
         # data, Groq API errors, timeouts — all degrade gracefully.
         logger.warning(f"generate_insight failed for type='{insight_type}': {e}")
         return FALLBACK_TEXT
+
+
+def generate_all_insights():
+    """
+    Runs generate_insight() for all four analytics types using live data
+    from analytics_queries.py, and prints one combined summary
+    (total duration + insight count), matching the OpenSIS-style
+    one-line 'Duration / Output' format per pipeline step.
+    """
+    from api.services.analytics_queries import (
+        get_best_selling_materials_raw,
+        get_peak_day_of_week_raw,
+        get_peak_hour_of_day_raw,
+        get_daily_sales_trend_raw,
+    )
+
+    start = time.time()
+
+    insights = {
+        "best-sellers": generate_insight(get_best_selling_materials_raw(), "best-sellers"),
+        "peak-day": generate_insight(get_peak_day_of_week_raw(), "peak-day"),
+        "peak-hour": generate_insight(get_peak_hour_of_day_raw(), "peak-hour"),
+        "trend": generate_insight(get_daily_sales_trend_raw(), "trend"),
+    }
+
+    duration = time.time() - start
+    generated_count = sum(1 for v in insights.values() if v != FALLBACK_TEXT)
+
+    print(f"[AI Insight Summary] duration={duration:.2f}s insights_generated={generated_count}/4")
+    for key, text in insights.items():
+        print(f"  {key}: {text}")
+
+    return {
+        "duration_seconds": round(duration, 2),
+        "insights_generated": generated_count,
+        "insights": insights,
+    }

@@ -7,10 +7,20 @@ instead of Django's ORM/SQLite, since analytics data lives in the
 ClickHouse warehouse populated by the separate ETL pipeline (scripts/extraction.py).
 """
 
+import logging
 import os
-import clickhouse_connect
-import pandas as pd
+import time
+from types import SimpleNamespace
+
+try:
+    import clickhouse_connect
+except ImportError:
+    clickhouse_connect = None
+
+import pandas
 from django.db.models import Sum, F
+
+logger = logging.getLogger(__name__)
 
 CH_CONFIG = {
     "host": os.environ.get("CH_HOST"),
@@ -18,29 +28,32 @@ CH_CONFIG = {
     "username": os.environ.get("CH_USER"),
     "password": os.environ.get("CH_PASSWORD", ""),
 }
-print(
-    "DEBUG CH_CONFIG import:",
-    CH_CONFIG.get("host"),
-    CH_CONFIG.get("port"),
-    CH_CONFIG.get("username"),
-    len(str(CH_CONFIG.get("password", ""))),
-)
 
 TABLE_NAME = "order_items_flat"
 
 
 def get_client():
+    if clickhouse_connect is None:
+        raise RuntimeError("clickhouse_connect is not installed")
     return clickhouse_connect.get_client(**CH_CONFIG)
+
+
+def _query_clickhouse(query):
+    try:
+        client = get_client()
+        return client.query(query)
+    except Exception as exc:
+        logger.exception("ClickHouse query failed: %s", exc)
+        return SimpleNamespace(result_rows=[], column_names=[])
 
 
 def _df_to_records(df):
     """Convert a DataFrame to plain JSON-safe dicts (handles Decimal/NaN)."""
-    df = df.astype(object).where(pd.notnull(df), None)
+    df = df.astype(object).where(pandas.notnull(df), None)
     return df.to_dict(orient="records")
 
 
 def get_best_selling_materials_raw(days=None):
-    client = get_client()
     where_clause = f"WHERE created_at >= now() - INTERVAL {int(days)} DAY" if days else ""
     query = f"""
         SELECT
@@ -52,8 +65,7 @@ def get_best_selling_materials_raw(days=None):
         GROUP BY material_name
         ORDER BY total_qty DESC
     """
-    result = client.query(query)
-    # If ClickHouse returned no rows, fall back to Django DB aggregation
+    result = _query_clickhouse(query)
     if not result.result_rows:
         from api.models import OrderItem
 
@@ -71,13 +83,12 @@ def get_best_selling_materials_raw(days=None):
             for r in qs
         ]
 
-    df = pd.DataFrame(result.result_rows, columns=result.column_names)
+    df = pandas.DataFrame(result.result_rows, columns=result.column_names)
     df.columns = [col.lower() for col in df.columns]
     return _df_to_records(df)
 
 
 def get_peak_day_of_week_raw():
-    client = get_client()
     query = f"""
         SELECT
             toDayOfWeek(created_at) AS day_of_week,
@@ -86,8 +97,7 @@ def get_peak_day_of_week_raw():
         GROUP BY day_of_week
         ORDER BY total_qty DESC
     """
-    result = client.query(query)
-    # fallback to Django DB if ClickHouse empty
+    result = _query_clickhouse(query)
     if not result.result_rows:
         from collections import Counter
         from api.models import OrderItem
@@ -104,7 +114,7 @@ def get_peak_day_of_week_raw():
         day_names = {1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday'}
         return [{'day_of_week': k, 'total_qty': v, 'day_name': day_names.get(k)} for k, v in ordered]
 
-    df = pd.DataFrame(result.result_rows, columns=result.column_names)
+    df = pandas.DataFrame(result.result_rows, columns=result.column_names)
     df.columns = [col.lower() for col in df.columns]
 
     day_names = {1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday",
@@ -116,7 +126,6 @@ def get_peak_day_of_week_raw():
 
 
 def get_peak_hour_of_day_raw():
-    client = get_client()
     query = f"""
         SELECT
             toHour(created_at) AS hour_of_day,
@@ -125,7 +134,7 @@ def get_peak_hour_of_day_raw():
         GROUP BY hour_of_day
         ORDER BY total_qty DESC
     """
-    result = client.query(query)
+    result = _query_clickhouse(query)
     if not result.result_rows:
         from collections import Counter
         from api.models import OrderItem
@@ -141,13 +150,12 @@ def get_peak_hour_of_day_raw():
         ordered = sorted(counts.items(), key=lambda x: x[1], reverse=True)
         return [{'hour_of_day': h, 'total_qty': q} for h, q in ordered]
 
-    df = pd.DataFrame(result.result_rows, columns=result.column_names)
+    df = pandas.DataFrame(result.result_rows, columns=result.column_names)
     df.columns = [col.lower() for col in df.columns]
     return _df_to_records(df)
 
 
 def get_daily_sales_trend_raw():
-    client = get_client()
     query = f"""
         SELECT
             toDate(created_at) AS sale_date,
@@ -157,9 +165,8 @@ def get_daily_sales_trend_raw():
         GROUP BY sale_date
         ORDER BY sale_date ASC
     """
-    result = client.query(query)
+    result = _query_clickhouse(query)
     if not result.result_rows:
-        # build trend from Django DB
         from collections import defaultdict
         from api.models import OrderItem
         rows = OrderItem.objects.select_related('order').values_list('order__created_at', 'qty', 'unit_price')
@@ -172,8 +179,7 @@ def get_daily_sales_trend_raw():
             agg[day]['total_revenue'] += float((qty or 0) * float(unit_price or 0))
 
         items = sorted([(d, v['total_qty'], v['total_revenue']) for d, v in agg.items()], key=lambda x: x[0])
-        import pandas as pd
-        df = pd.DataFrame([{'sale_date': d, 'total_qty': q, 'total_revenue': r} for d, q, r in items])
+        df = pandas.DataFrame([{'sale_date': d, 'total_qty': q, 'total_revenue': r} for d, q, r in items])
         if df.empty:
             return []
         df['revenue_change_pct'] = (df['total_revenue'].astype(float).pct_change() * 100).round(2)
@@ -181,7 +187,7 @@ def get_daily_sales_trend_raw():
         df['sale_date'] = df['sale_date'].astype(str)
         return _df_to_records(df)
 
-    df = pd.DataFrame(result.result_rows, columns=result.column_names)
+    df = pandas.DataFrame(result.result_rows, columns=result.column_names)
     df.columns = [col.lower() for col in df.columns]
 
     if "total_revenue" not in df.columns:
@@ -190,7 +196,35 @@ def get_daily_sales_trend_raw():
     df["revenue_change_pct"] = (df["total_revenue"].astype(float).pct_change() * 100).round(2)
     df["qty_change_pct"] = (df["total_qty"].astype(float).pct_change() * 100).round(2)
 
-    # sale_date is a datetime.date object — convert to string for JSON safety
     df["sale_date"] = df["sale_date"].astype(str)
-
     return _df_to_records(df)
+
+
+def get_analytics_summary():
+    """
+    Runs all four analytics queries once and prints a single combined
+    summary (total duration + total records), similar to the OpenSIS
+    sample's one-line 'Duration / Output' format per pipeline step.
+    """
+    start = time.time()
+
+    best_sellers = get_best_selling_materials_raw()
+    peak_day = get_peak_day_of_week_raw()
+    peak_hour = get_peak_hour_of_day_raw()
+    trend = get_daily_sales_trend_raw()
+
+    duration = time.time() - start
+    total_records = len(best_sellers) + len(peak_day) + len(peak_hour) + len(trend)
+
+    print(f"[Analytics Summary] duration={duration:.2f}s total_records={total_records}")
+    print(f"  best_sellers={len(best_sellers)} peak_day={len(peak_day)} "
+          f"peak_hour={len(peak_hour)} trend={len(trend)}")
+
+    return {
+        "duration_seconds": round(duration, 2),
+        "total_records": total_records,
+        "best_sellers": best_sellers,
+        "peak_day": peak_day,
+        "peak_hour": peak_hour,
+        "trend": trend,
+    }

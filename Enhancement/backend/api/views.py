@@ -516,7 +516,7 @@ def best_selling_materials(request):
         days = request.query_params.get('days')
         days = int(days) if days else None
         data = get_best_selling_materials_raw(days=days)
-        insight = generate_insight(data, insight_type = best_selling_materials)
+        insight = generate_insight(data, insight_type='best-sellers')
         return Response({"data": data, "insight": insight})
     except Exception as exc:
         return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -526,7 +526,7 @@ def best_selling_materials(request):
 def peak_day_of_week(request):
     try:
         data = get_peak_day_of_week_raw()
-        insight = generate_insight(data, insight_type = peak_day_of_week)
+        insight = generate_insight(data, insight_type='peak-day')
         return Response({"data": data, "insight": insight})    
     except Exception as exc:
         return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -536,7 +536,7 @@ def peak_day_of_week(request):
 def peak_hour_of_day(request):
     try:
         data = get_peak_hour_of_day_raw()
-        insight = generate_insight(data, insight_type = peak_hour_of_day)
+        insight = generate_insight(data, insight_type='peak-hour')
         return Response({"data": data, "insight": insight})
     except Exception as exc:
         return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -546,7 +546,7 @@ def peak_hour_of_day(request):
 def daily_sales_trend(request):
     try:
         data = get_daily_sales_trend_raw()
-        insight = generate_insight(data, insight_type = daily_sales_trend)
+        insight = generate_insight(data, insight_type='trend')
         return Response({"data": data, "insight": insight})
     except Exception as exc:
         return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
