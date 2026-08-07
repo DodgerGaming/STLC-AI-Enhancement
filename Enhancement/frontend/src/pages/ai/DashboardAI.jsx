@@ -8,6 +8,7 @@ import KpiCardAI from '../../components/ai/KpiCardAI.jsx'
 import AIInsightPanel from '../../components/ai/AIInsightPanel.jsx'
 import TopMovingItemsTable from '../../components/ai/TopMovingItemsTable.jsx'
 import AveragePeakHourChart from '../../components/ai/AveragePeakHourChart.jsx'
+import AIInsightSearchPopup from '../../components/ai/AIInsightSearchPopup.jsx'
 import { getJson } from '../../utils/api.js'
 import { formatPeso, formatNumber } from '../../utils/format.js'
 
@@ -402,6 +403,8 @@ export default function DashboardAI() {
       </div>
 
       <LowStockDetailsModal open={isLowStockDetailsOpen} onClose={closeLowStockDetails} data={[]} />
+
+      <AIInsightSearchPopup />
 
       <div className="mt-6 overflow-hidden rounded-xl border border-outline-variant bg-surface shadow-card">
         <div className="flex flex-col gap-3 border-b border-outline-variant px-4 py-4 sm:gap-4 sm:px-5 md:flex-row md:items-center md:justify-between">

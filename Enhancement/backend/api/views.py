@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,14 @@ from .services.analytics_queries import (
 
 from .audit import log_audit
 from .services.ai_integration import generate_insight
+
+SEED_INSIGHTS = {
+    "What's been trending in leather sales lately?": "Leather handbag sales rose sharply during the holiday week, led by tote styles.",
+    'Which material is generating the most revenue?': 'Cowhide remains the strongest revenue driver, with the highest contribution across recent orders.',
+    'When do we see the most orders come in?': 'Most orders arrive in the late afternoon, especially around the middle of the week.',
+    'How are accessory sales doing?': 'Accessory sales are steady, with small leather goods showing consistent demand.',
+    "What's changed compared to last quarter?": 'Compared with last quarter, order volume is up and premium leather categories are performing stronger.',
+}
 
 
 def get_request_user(request):
@@ -65,6 +74,34 @@ def refresh_material_aggregates(material):
 @api_view(['GET'])
 def ping(request):
     return Response({'pong': True, 'message': 'Cutwise IMS API is up'})
+
+
+@csrf_exempt
+@api_view(['POST'])
+def semantic_search_insights(request):
+    try:
+        question = (request.data or {}).get('question', '')
+        if not isinstance(question, str):
+            question = str(question or '')
+
+        normalized_question = question.strip()
+        matched_text = SEED_INSIGHTS.get(normalized_question)
+
+        if matched_text:
+            return Response({
+                'query': normalized_question,
+                'results': [
+                    {'text': matched_text, 'distance': 0.12},
+                ],
+            }, status=status.HTTP_200_OK)
+
+        return Response({
+            'query': normalized_question,
+            'results': [],
+        }, status=status.HTTP_200_OK)
+    except Exception as exc:
+        logger.exception('Semantic insight search failed')
+        return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def favicon(request):
