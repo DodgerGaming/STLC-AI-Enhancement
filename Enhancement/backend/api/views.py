@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,38 @@ from .services.analytics_queries import (
 )
 
 from .audit import log_audit
+from .services.ai_integration import generate_insight
+
+
+def classify_question_and_get_insight(question: str) -> tuple:
+    """
+    Classify a user question and fetch appropriate analytics data,
+    then generate an AI insight.
+    
+    Returns: (insight_text, insight_type) where insight_type is one of
+    'best-sellers', 'peak-day', 'peak-hour', 'trend'
+    """
+    q_lower = question.lower()
+    
+    # Classify based on keywords
+    if any(keyword in q_lower for keyword in ['trending', 'trend', 'sales lately', 'recently', 'changed', 'last quarter', 'compared']):
+        data = get_daily_sales_trend_raw()
+        return generate_insight(data, 'trend'), 'trend'
+    
+    if any(keyword in q_lower for keyword in ['revenue', 'revenue driver', 'generating', 'best seller', 'top material', 'accessory sales', 'accessory']):
+        data = get_best_selling_materials_raw()
+        return generate_insight(data, 'best-sellers'), 'best-sellers'
+    
+    if any(keyword in q_lower for keyword in ['when', 'peak', 'most orders', 'hour', 'afternoon', 'time of day']):
+        data = get_peak_hour_of_day_raw()
+        return generate_insight(data, 'peak-hour'), 'peak-hour'
+    
+    if any(keyword in q_lower for keyword in ['day of week', 'day we see', 'which day', 'busiest day', 'peak day']):
+        data = get_peak_day_of_week_raw()
+        return generate_insight(data, 'peak-day'), 'peak-day'
+    
+    # Fallback: return a generic message
+    return "I'm not sure how to answer that. Try asking about trending sales, top materials, peak hours, or peak days.", 'unknown'
 
 
 def get_request_user(request):
@@ -64,6 +97,35 @@ def refresh_material_aggregates(material):
 @api_view(['GET'])
 def ping(request):
     return Response({'pong': True, 'message': 'Cutwise IMS API is up'})
+
+
+@csrf_exempt
+@api_view(['POST'])
+def semantic_search_insights(request):
+    try:
+        question = (request.data or {}).get('question', '')
+        if not isinstance(question, str):
+            question = str(question or '')
+
+        normalized_question = question.strip()
+        if not normalized_question:
+            return Response({
+                'query': normalized_question,
+                'results': [],
+            }, status=status.HTTP_200_OK)
+
+        # Generate AI insight based on the question
+        insight_text, insight_type = classify_question_and_get_insight(normalized_question)
+
+        return Response({
+            'query': normalized_question,
+            'results': [
+                {'text': insight_text, 'distance': 0.0, 'type': insight_type},
+            ],
+        }, status=status.HTTP_200_OK)
+    except Exception as exc:
+        logger.exception('Semantic insight search failed')
+        return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def favicon(request):
@@ -515,7 +577,8 @@ def best_selling_materials(request):
         days = request.query_params.get('days')
         days = int(days) if days else None
         data = get_best_selling_materials_raw(days=days)
-        return Response(data)
+        insight = generate_insight(data, insight_type='best-sellers')
+        return Response({"data": data, "insight": insight})
     except Exception as exc:
         return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -524,7 +587,8 @@ def best_selling_materials(request):
 def peak_day_of_week(request):
     try:
         data = get_peak_day_of_week_raw()
-        return Response(data)
+        insight = generate_insight(data, insight_type='peak-day')
+        return Response({"data": data, "insight": insight})    
     except Exception as exc:
         return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -533,7 +597,8 @@ def peak_day_of_week(request):
 def peak_hour_of_day(request):
     try:
         data = get_peak_hour_of_day_raw()
-        return Response(data)
+        insight = generate_insight(data, insight_type='peak-hour')
+        return Response({"data": data, "insight": insight})
     except Exception as exc:
         return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -542,6 +607,7 @@ def peak_hour_of_day(request):
 def daily_sales_trend(request):
     try:
         data = get_daily_sales_trend_raw()
-        return Response(data)
+        insight = generate_insight(data, insight_type='trend')
+        return Response({"data": data, "insight": insight})
     except Exception as exc:
         return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

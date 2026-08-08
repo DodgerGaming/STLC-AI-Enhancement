@@ -16,6 +16,7 @@ urlpatterns = [
     path('analytics/peak-day/', views.peak_day_of_week, name='peak-day-of-week'),
     path('analytics/peak-hour/', views.peak_hour_of_day, name='peak-hour-of-day'),
     path('analytics/trend/', views.daily_sales_trend, name='daily-sales-trend'),
+    path('insights/search/', views.semantic_search_insights, name='semantic-search-insights'),
     path('authentication/', include('api.authentication.urls')),
     
 ]
